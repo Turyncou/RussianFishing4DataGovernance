@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(grep -E \"\\\\.py$|\\\\.csv$|\\\\.json$|\\\\.toml$\")",
+      "Bash(dir \"D:\\\\Ivy\\\\GQ\\\\lyf\\\\RussianFishing4DataGovernance\" /s /b)",
+      "Bash(findstr /v \"__pycache__\")",
+      "Bash(findstr /v \".git\")"
+    ]
+  }
+}
