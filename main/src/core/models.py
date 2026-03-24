@@ -211,3 +211,38 @@ class AccountCredential:
             raise ValueError("Account name cannot be empty")
         if not self.encrypted_password.strip():
             raise ValueError("Password cannot be empty")
+
+
+@dataclass
+class BaitConsumption:
+    """Represents a bait/tackle item with stock tracking"""
+    name: str           # Bait/Tackle name
+    total_bought: int   # Total quantity bought
+    total_used: int     # Total quantity used
+
+    @property
+    def remaining(self) -> int:
+        """Remaining quantity"""
+        return max(0, self.total_bought - self.total_used)
+
+    @property
+    def usage_per_day_estimate(self) -> float:
+        """Estimated usage per day based on history (not stored, calculated when needed)"""
+        # This can be calculated from usage records if we add that later
+        return 0
+
+    def __post_init__(self):
+        if not self.name.strip():
+            raise ValueError("Bait name cannot be empty")
+        if self.total_bought < 0:
+            raise ValueError("Total bought cannot be negative")
+        if self.total_used < 0:
+            raise ValueError("Total used cannot be negative")
+
+    def add_stock(self, quantity: int) -> None:
+        """Add more stock"""
+        self.total_bought += quantity
+
+    def use_stock(self, quantity: int) -> None:
+        """Use some stock, cannot go below zero"""
+        self.total_used = min(self.total_bought, self.total_used + quantity)

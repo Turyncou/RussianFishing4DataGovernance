@@ -2,13 +2,14 @@
 import json
 import os
 import base64
-from datetime import date
+import shutil
+from datetime import datetime
 from typing import Any, List
 from cryptography.fernet import Fernet
 from core.models import (
     LotteryPrize, ActivityRecord, ActivityCharacter, ActivityGoal, ActivityType,
     StorageCharacter, FriendLink, BackgroundConfig, SuggestionUserSettings,
-    AccountCredential
+    AccountCredential, BaitConsumption
 )
 
 
@@ -374,3 +375,75 @@ class CredentialsPersistence(DataPersistence):
     def get_plain_password(self, account: AccountCredential) -> str:
         """Get decrypted plain password from account"""
         return self._decrypt_password(account.encrypted_password)
+
+
+class BaitPersistence(DataPersistence):
+    """Persistence for bait/tackle consumption tracking"""
+
+    def __init__(self, file_path: str):
+        super().__init__(file_path)
+
+    def save_baits(self, baits: List[BaitConsumption]) -> None:
+        """Save bait list to file"""
+        data = [
+            {
+                'name': b.name,
+                'total_bought': b.total_bought,
+                'total_used': b.total_used
+            }
+            for b in baits
+        ]
+        self.save(data)
+
+    def load_baits(self) -> List[BaitConsumption]:
+        """Load bait list from file"""
+        data = self.load()
+        if not data:
+            return []
+
+        try:
+            baits = []
+            for item in data:
+                bait = BaitConsumption(
+                    name=item.get('name', ''),
+                    total_bought=item.get('total_bought', 0),
+                    total_used=item.get('total_used', 0)
+                )
+                baits.append(bait)
+            return baits
+        except (KeyError, ValueError):
+            return []
+
+
+def create_auto_backup(source_dir: str, backup_dir: str) -> str:
+    """Create automatic backup of all JSON data files
+
+    Returns:
+        Path to the created backup directory
+    """
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_path = os.path.join(backup_dir, f'backup_{timestamp}')
+    os.makedirs(backup_path, exist_ok=True)
+
+    # Backup all JSON files in source directory
+    for filename in os.listdir(source_dir):
+        if filename.endswith('.json') or filename.endswith('.json.key'):
+            source_file = os.path.join(source_dir, filename)
+            dest_file = os.path.join(backup_path, filename)
+            shutil.copy2(source_file, dest_file)
+
+    return backup_path
+
+
+def list_backups(backup_dir: str) -> list[str]:
+    """List available backups sorted by newest first"""
+    if not os.path.exists(backup_dir):
+        return []
+
+    backups = []
+    for name in os.listdir(backup_dir):
+        if os.path.isdir(os.path.join(backup_dir, name)) and name.startswith('backup_'):
+            backups.append(name)
+
+    backups.sort(reverse=True)
+    return backups

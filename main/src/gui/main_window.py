@@ -7,8 +7,9 @@ from tkinter import Canvas, messagebox
 import webbrowser
 
 from data.persistence import (
-    LotteryPersistence, ActivityPersistence, StoragePersistence,
-    FriendLinkPersistence, BackgroundPersistence, CredentialsPersistence
+    LotteryPersistence, ActivityPersistence, StoragePersistence, BaitPersistence,
+    FriendLinkPersistence, BackgroundPersistence, CredentialsPersistence,
+    create_auto_backup, list_backups
 )
 from core.models import FriendLink, BackgroundConfig
 from .cat_follower import CatFollower
@@ -16,6 +17,8 @@ from .lottery_frame import LotteryFrame
 from .activity_frame import ActivityFrame
 from .storage_frame import StorageFrame
 from .credentials_frame import CredentialsFrame
+from .bait_frame import BaitFrame
+from .backup_dialog import BackupRestoreDialog
 from .background_dialog import BackgroundDialog
 from .friend_links_dialog import FriendLinksDialog
 
@@ -35,9 +38,24 @@ class MainWindow:
         self.lottery_persistence = LotteryPersistence(os.path.join(data_dir, 'lottery.json'))
         self.activity_persistence = ActivityPersistence(os.path.join(data_dir, 'activity.json'))
         self.storage_persistence = StoragePersistence(os.path.join(data_dir, 'storage.json'))
+        self.bait_persistence = BaitPersistence(os.path.join(data_dir, 'bait.json'))
         self.friend_link_persistence = FriendLinkPersistence(os.path.join(data_dir, 'friend_links.json'))
         self.background_persistence = BackgroundPersistence(os.path.join(data_dir, 'background.json'))
         self.credentials_persistence = CredentialsPersistence(os.path.join(data_dir, 'credentials.json'))
+
+        # Create automatic backup on startup
+        self.backup_dir = os.path.join(data_dir, 'backups')
+        os.makedirs(self.backup_dir, exist_ok=True)
+        # Keep last 10 backups automatically
+        backups = list_backups(self.backup_dir)
+        if len(backups) >= 10:
+            # Remove oldest backups beyond 10
+            for old_backup in backups[10:]:
+                old_path = os.path.join(self.backup_dir, old_backup)
+                import shutil
+                shutil.rmtree(old_path, ignore_errors=True)
+        # Create new backup
+        create_auto_backup(data_dir, self.backup_dir)
 
         # Setup window
         self.app.title("RF4 Data Process")
@@ -126,6 +144,16 @@ class MainWindow:
         )
         self.bg_button.pack(side="left", padx=5)
 
+        # Backup/Restore button (middle-left)
+        self.backup_button = ctk.CTkButton(
+            self.bottom_bar,
+            text="💾 备份恢复",
+            command=self.open_backup_dialog,
+            width=100,
+            corner_radius=8
+        )
+        self.backup_button.pack(side="left", padx=5)
+
         # Friend links button (right)
         self.friend_button = ctk.CTkButton(
             self.bottom_bar,
@@ -163,7 +191,7 @@ class MainWindow:
 
         # Big buttons for each function
         btn_size = 240
-        btn_height = 90
+        btn_height = 80
         btn_font = ctk.CTkFont(size=20, weight="bold")
 
         activity_btn = ctk.CTkButton(
@@ -177,7 +205,7 @@ class MainWindow:
             fg_color="#2c5aa0",
             hover_color="#1a3d66"
         )
-        activity_btn.pack(pady=12)
+        activity_btn.pack(pady=10)
 
         storage_btn = ctk.CTkButton(
             btn_container,
@@ -190,7 +218,20 @@ class MainWindow:
             fg_color="#2c5aa0",
             hover_color="#1a3d66"
         )
-        storage_btn.pack(pady=12)
+        storage_btn.pack(pady=10)
+
+        bait_btn = ctk.CTkButton(
+            btn_container,
+            text="🎣 饵料库存",
+            command=self.show_bait,
+            width=btn_size,
+            height=btn_height,
+            font=btn_font,
+            corner_radius=12,
+            fg_color="#2c5aa0",
+            hover_color="#1a3d66"
+        )
+        bait_btn.pack(pady=10)
 
         lottery_btn = ctk.CTkButton(
             btn_container,
@@ -203,7 +244,7 @@ class MainWindow:
             fg_color="#2c5aa0",
             hover_color="#1a3d66"
         )
-        lottery_btn.pack(pady=12)
+        lottery_btn.pack(pady=10)
 
         credentials_btn = ctk.CTkButton(
             btn_container,
@@ -216,7 +257,7 @@ class MainWindow:
             fg_color="#2c5aa0",
             hover_color="#1a3d66"
         )
-        credentials_btn.pack(pady=12)
+        credentials_btn.pack(pady=10)
 
         self.current_frame = home_frame
 
@@ -291,6 +332,23 @@ class MainWindow:
             self.credentials_persistence
         )
         self.credentials_frame.pack(fill="both", expand=True)
+
+        self.current_frame = frame
+
+    def show_bait(self):
+        """Show bait/tackle consumption tracking page"""
+        # Show back button
+        self.back_button.pack(side="left", padx=(10, 0), pady=10)
+        self.clear_current_content()
+
+        frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+        frame.pack(fill="both", expand=True)
+
+        self.bait_frame = BaitFrame(
+            frame,
+            self.bait_persistence
+        )
+        self.bait_frame.pack(fill="both", expand=True)
 
         self.current_frame = frame
 
@@ -389,6 +447,14 @@ class MainWindow:
     def on_friend_links_changed(self, new_links: list[FriendLink]):
         """Callback when friend links are changed"""
         self.friend_link_persistence.save_links(new_links)
+
+    def open_backup_dialog(self):
+        """Open backup and restore dialog"""
+        BackupRestoreDialog(
+            self.app,
+            self.data_dir,
+            self.backup_dir
+        )
 
     def on_closing(self):
         """Handle window closing - save all data"""

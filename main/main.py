@@ -12,6 +12,7 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 from gui.main_window import MainWindow
+from gui.desktop_reminder import DesktopReminderWindow
 
 
 def main():
@@ -30,8 +31,15 @@ def main():
     # Create main window
     main_window = MainWindow(app, app_dir)
 
+    # Create desktop floating reminder (circular placeholder for Live2D)
+    desktop_reminder = DesktopReminderWindow(app)
+
     # Set closing protocol
-    app.protocol("WM_DELETE_WINDOW", main_window.on_closing)
+    def on_closing():
+        # Close both windows
+        app.destroy()
+
+    app.protocol("WM_DELETE_WINDOW", on_closing)
 
     # Run the app
     app.mainloop()
