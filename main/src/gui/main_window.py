@@ -260,6 +260,8 @@ class MainWindow:
         credentials_btn.pack(pady=10)
 
         self.current_frame = home_frame
+        # Update scrollable region after adding content
+        self.content_container.update()
 
     def clear_current_content(self):
         """Clear the current content frame"""
@@ -283,6 +285,8 @@ class MainWindow:
         self.activity_frame.pack(fill="both", expand=True)
 
         self.current_frame = frame
+        # Update scrollable region after adding content
+        self.content_container.update()
 
     def show_storage(self):
         """Show storage duration page"""
@@ -300,6 +304,8 @@ class MainWindow:
         self.storage_frame.pack(fill="both", expand=True)
 
         self.current_frame = frame
+        # Update scrollable region after adding content
+        self.content_container.update()
 
     def show_lottery(self):
         """Show lottery wheel page"""
@@ -317,6 +323,8 @@ class MainWindow:
         self.lottery_frame.pack(fill="both", expand=True)
 
         self.current_frame = frame
+        # Update scrollable region after adding content
+        self.content_container.update()
 
     def show_credentials(self):
         """Show account credentials manager page"""
@@ -334,6 +342,8 @@ class MainWindow:
         self.credentials_frame.pack(fill="both", expand=True)
 
         self.current_frame = frame
+        # Update scrollable region after adding content
+        self.content_container.update()
 
     def show_bait(self):
         """Show bait/tackle consumption tracking page"""
@@ -351,6 +361,8 @@ class MainWindow:
         self.bait_frame.pack(fill="both", expand=True)
 
         self.current_frame = frame
+        # Update scrollable region after adding content
+        self.content_container.update()
 
     def load_background(self):
         """Load background configuration from file"""

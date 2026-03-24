@@ -3,7 +3,7 @@ import json
 import os
 import base64
 import shutil
-from datetime import datetime
+from datetime import datetime, date
 from typing import Any, List
 from cryptography.fernet import Fernet
 from core.models import (
@@ -93,11 +93,20 @@ class ActivityPersistence(DataPersistence):
     def __init__(self, file_path: str):
         super().__init__(file_path)
 
-    def save_characters(self, characters: List[ActivityCharacter]) -> None:
-        """Save activity characters to file"""
+    def save_characters(self, characters: List[ActivityCharacter], global_suggestion_settings: SuggestionUserSettings = None) -> None:
+        """Save activity characters to file, with global suggestion settings"""
         # Archive records from previous days
         today = date.today()
-        data = []
+        data = {
+            'version': 2,
+            'global_suggestion_settings': {
+                'daily_total_hours': global_suggestion_settings.daily_total_hours,
+                'grinding_concurrent': global_suggestion_settings.grinding_concurrent,
+                'star_waiting_concurrent': global_suggestion_settings.star_waiting_concurrent,
+                'switch_minutes': global_suggestion_settings.switch_minutes
+            } if global_suggestion_settings else None,
+            'characters': []
+        }
         for char in characters:
             char_data = {
                 'name': char.name,
@@ -123,6 +132,7 @@ class ActivityPersistence(DataPersistence):
                     'target_duration': char.star_waiting_goal.target_duration,
                     'total_income': char.star_waiting_goal.total_income
                 } if char.star_waiting_goal else None,
+                # Keep per-character settings for backward compatibility
                 'suggestion_settings': {
                     'daily_total_hours': char.suggestion_settings.daily_total_hours,
                     'grinding_concurrent': char.suggestion_settings.grinding_concurrent,
@@ -130,19 +140,37 @@ class ActivityPersistence(DataPersistence):
                     'switch_minutes': char.suggestion_settings.switch_minutes
                 }
             }
-            data.append(char_data)
+            data['characters'].append(char_data)
         self.save(data)
 
-    def load_characters(self) -> List[ActivityCharacter]:
-        """Load activity characters from file"""
+    def load_characters(self) -> tuple[List[ActivityCharacter], SuggestionUserSettings | None]:
+        """Load activity characters from file, returns (characters, global_suggestion_settings)"""
         data = self.load()
         if not data:
-            return []
+            return [], None
 
         try:
+            # Check if new format with global settings
+            if isinstance(data, dict) and 'characters' in data:
+                # Version 2 format
+                characters_data = data.get('characters', [])
+                global_settings_data = data.get('global_suggestion_settings')
+                global_settings = None
+                if global_settings_data:
+                    global_settings = SuggestionUserSettings(
+                        daily_total_hours=global_settings_data.get('daily_total_hours', 8.0),
+                        grinding_concurrent=global_settings_data.get('grinding_concurrent', 1),
+                        star_waiting_concurrent=global_settings_data.get('star_waiting_concurrent', 1),
+                        switch_minutes=global_settings_data.get('switch_minutes', 20)
+                    )
+            else:
+                # Version 1 format - old format is just list of characters
+                characters_data = data
+                global_settings = None
+
             characters = []
             today = date.today()
-            for item in data:
+            for item in characters_data:
                 char = ActivityCharacter(name=item.get('name', ''))
 
                 # Load goals
@@ -188,9 +216,10 @@ class ActivityPersistence(DataPersistence):
                         )
                         char.add_record(record)
                 characters.append(char)
-            return characters
+
+            return characters, global_settings
         except (KeyError, ValueError):
-            return []
+            return [], None
 
 
 class StoragePersistence(DataPersistence):

@@ -24,6 +24,16 @@ def main():
     # Create app
     app = ctk.CTk()
 
+    # Set window icon - for CustomTkinter needs after to work correctly
+    script_dir = os.path.abspath(os.path.dirname(__file__))
+    icon_path = os.path.join(script_dir, "芋泥.ico")
+    if os.path.exists(icon_path):
+        try:
+            # After window is created, set icon
+            app.after(100, lambda: app.iconbitmap(icon_path))
+        except:
+            pass  # Ignore if icon loading fails
+
     # Get app data directory
     app_dir = os.path.join(os.path.expanduser('~'), '.rf4_data_process')
     os.makedirs(app_dir, exist_ok=True)

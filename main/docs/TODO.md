@@ -98,3 +98,44 @@ pyinstaller build.spec
 - [站酷萌宠体](https://www.zcool.com.cn/font/zcoolmengchongti) - 胖胖圆圆
 - [猫啃丸纸体](https://www.maoken.com/freefonts/1252.html) - 软萌手写风
 
+### 完整打包步骤
+
+**1. 安装依赖**
+```bash
+# 安装项目依赖
+pip install -r ../requirements.txt
+# 安装 PyInstaller
+pip install pyinstaller
+```
+
+**2. 确认文件位置**
+- 图标文件：`main/芋泥.ico` ✅ 已经在 `build.spec` 中配置好了
+- 自定义字体（可选）：放入 `main/fonts/` 目录，会自动打包
+
+**3. 执行打包**
+```bash
+cd main
+pyinstaller build.spec
+```
+
+**4. 输出结果**
+- 打包完成后 exe 在 `dist/RF4DataProcess.exe`
+
+### 分享给其他电脑使用
+
+打包完成后，需要打包以下内容一起压缩为 zip：
+
+```
+RF4DataProcess/
+├── RF4DataProcess.exe          # 主程序（打包生成的）
+├── 芋泥.ico                     # 图标（可选，如果需要快捷方式）
+└── fonts/                      # 如果使用了自定义字体，带上这个目录
+    └── your-font.ttf
+```
+
+> ⚠️ **注意**：程序第一次运行时，会自动在 `C:\Users\<用户名>\.rf4_data_process\` 创建数据目录存储数据，不需要你提前创建。
+
+### 依赖说明
+
+项目需要的 Python 第三方库都在 `requirements.txt` 中，打包后这些依赖都已经编译进 exe 了，其他电脑不需要安装 Python 或任何依赖，直接双击 exe 就能运行。
+

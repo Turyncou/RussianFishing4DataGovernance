@@ -23,6 +23,8 @@ class ActivityFrame(ctk.CTkFrame):
         self.persistence = persistence
         self.characters: List[ActivityCharacter] = []
         self.current_character: Optional[ActivityCharacter] = None
+        # Global suggestion settings (not per-character)
+        self.global_suggestion_settings = SuggestionUserSettings()
 
         self.create_widgets()
         self.load_data()
@@ -74,13 +76,55 @@ class ActivityFrame(ctk.CTkFrame):
         )
         del_char_btn.pack(pady=6)
 
-        # Right side - stats and table (scrollable when content doesn't fit)
+        # Right side - stats and table (use grid to avoid covering buttons)
         right_frame = ctk.CTkFrame(self, fg_color="transparent")
         right_frame.pack(side="right", fill="both", expand=True, padx=8, pady=8)
+        right_frame.grid_rowconfigure(0, weight=1)  # Tab gets all remaining space
+        right_frame.grid_columnconfigure(0, weight=1)
 
-        # Suggestion settings and result (always visible at bottom)
-        suggestion_frame = ctk.CTkFrame(right_frame, fg_color="#252525", corner_radius=12)
-        suggestion_frame.pack(fill="x", pady=(0, 8), side="bottom")
+        # Top/Middle - tab view
+        self.tab_view = ctk.CTkTabview(right_frame, corner_radius=8)
+        self.tab_view.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
+
+        # Add tabs
+        self.tab_grinding = self.tab_view.add("搬砖")
+        self.tab_star_waiting = self.tab_view.add("蹲星")
+
+        # Build activity tabs
+        self.build_activity_tab(self.tab_grinding, ActivityType.GRINDING)
+        self.build_activity_tab(self.tab_star_waiting, ActivityType.STAR_WAITING)
+
+        # Bottom - suggestion buttons and result (fixed bottom, not covered)
+        suggestion_bottom_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
+        suggestion_bottom_frame.grid(row=1, column=0, sticky="ew")
+
+        # Suggestion buttons
+        suggestion_btn_frame = ctk.CTkFrame(suggestion_bottom_frame, fg_color="transparent")
+        suggestion_btn_frame.pack(fill="x", pady=(0, 8))
+
+        # Center the buttons
+        btn_container = ctk.CTkFrame(suggestion_btn_frame, fg_color="transparent")
+        btn_container.pack(anchor="center")
+
+        settings_btn = ctk.CTkButton(
+            btn_container,
+            text="建议设置",
+            command=self.open_suggestion_settings,
+            width=100
+        )
+        settings_btn.pack(side="left", padx=5)
+
+        get_suggestion_btn = ctk.CTkButton(
+            btn_container,
+            text="获取建议",
+            command=self.calculate_and_show_suggestion,
+            width=100
+        )
+        get_suggestion_btn.pack(side="left", padx=5)
+
+        # Suggestion result
+        suggestion_frame = ctk.CTkFrame(suggestion_bottom_frame, fg_color="#252525", corner_radius=12)
+        suggestion_frame.pack(fill="x")
 
         ctk.CTkLabel(
             suggestion_frame,
@@ -90,47 +134,11 @@ class ActivityFrame(ctk.CTkFrame):
 
         self.suggestion_text = ctk.CTkLabel(
             suggestion_frame,
-            text="点击下方按钮获取安排建议",
+            text="点击上方按钮获取安排建议",
             font=ctk.CTkFont(size=12),
             wraplength=600
         )
         self.suggestion_text.pack(pady=5)
-
-        # Buttons
-        btn_frame = ctk.CTkFrame(suggestion_frame, fg_color="transparent")
-        btn_frame.pack(pady=(5, 10))
-
-        settings_btn = ctk.CTkButton(
-            btn_frame,
-            text="建议设置",
-            command=self.open_suggestion_settings,
-            width=100
-        )
-        settings_btn.pack(side="left", padx=5)
-
-        get_suggestion_btn = ctk.CTkButton(
-            btn_frame,
-            text="获取建议",
-            command=self.calculate_and_show_suggestion,
-            width=100
-        )
-        get_suggestion_btn.pack(side="left", padx=5)
-
-        # Use scrollable frame for tab content - scrolls independently
-        scrollable_frame = ctk.CTkScrollableFrame(right_frame, corner_radius=0)
-        scrollable_frame.pack(fill="both", expand=True)
-
-        # Create tab view for the two activities
-        self.tab_view = ctk.CTkTabview(scrollable_frame, corner_radius=8)
-        self.tab_view.pack(fill="both", expand=True, pady=(0, 10))
-
-        # Add tabs
-        self.tab_grinding = self.tab_view.add("搬砖")
-        self.tab_star_waiting = self.tab_view.add("蹲星")
-
-        # Build grinding tab
-        self.build_activity_tab(self.tab_grinding, ActivityType.GRINDING)
-        self.build_activity_tab(self.tab_star_waiting, ActivityType.STAR_WAITING)
 
     def build_activity_tab(self, parent, activity_type: ActivityType):
         """Build a tab for an activity"""
@@ -287,7 +295,15 @@ class ActivityFrame(ctk.CTkFrame):
 
     def load_data(self):
         """Load data from persistence"""
-        self.characters = self.persistence.load_characters()
+        result = self.persistence.load_characters()
+        if isinstance(result, tuple) and len(result) == 2:
+            self.characters, loaded_global_settings = result
+            # If we have loaded global settings, use it
+            if loaded_global_settings:
+                self.global_suggestion_settings = loaded_global_settings
+        else:
+            # Backward compatibility
+            self.characters = result
         self.update_character_list()
         if self.characters:
             self.character_listbox.selection_set(0)
@@ -494,25 +510,37 @@ class ActivityFrame(ctk.CTkFrame):
         self.save_data()
 
     def open_suggestion_settings(self):
-        """Open suggestion settings dialog"""
-        if not self.current_character:
-            return
+        """Open global suggestion settings dialog"""
+        print(f"[DEBUG] open_suggestion_settings called (global settings)")
+        def callback(new_settings):
+            print(f"[DEBUG] on_global_settings_done: new_settings={new_settings}")
+            self.global_suggestion_settings = new_settings
+            print("[DEBUG] Updated global settings, saving...")
+            self.save_data()
+            print("[DEBUG] Save done")
         dialog = SuggestionSettingsDialog(
             self.winfo_toplevel(),
-            self.current_character.suggestion_settings,
-            self.on_suggestion_settings_done
+            self.global_suggestion_settings,
+            callback
         )
+        print("[DEBUG] Dialog created")
 
     def on_suggestion_settings_done(self, new_settings: SuggestionUserSettings):
         """Callback when suggestion settings updated"""
+        print(f"[DEBUG] on_suggestion_settings_done called")
+        print(f"[DEBUG] new_settings: daily={new_settings.daily_total_hours}, grinding={new_settings.grinding_concurrent}, star={new_settings.star_waiting_concurrent}, switch={new_settings.switch_minutes}")
         if not self.current_character:
+            print("[DEBUG] No current character, returning")
             return
         self.current_character.suggestion_settings = new_settings
+        print(f"[DEBUG] Updated current_character.settings")
         self.save_data()
 
     def calculate_and_show_suggestion(self):
         """Calculate and show the suggestion based on all characters"""
+        print("[DEBUG] calculate_and_show_suggestion called")
         if not self.characters:
+            print("[DEBUG] No characters, returning")
             self.suggestion_text.configure(text="没有角色，无法生成建议")
             return
 
@@ -522,12 +550,15 @@ class ActivityFrame(ctk.CTkFrame):
             for char in self.characters
         )
         if not has_any_goal:
+            print("[DEBUG] No goals set, returning")
             self.suggestion_text.configure(text="没有设置任何目标，无法生成建议\n请在各角色中设置搬砖/蹲星目标")
             return
 
+        print(f"[DEBUG] {len(self.characters)} characters, has_any_goal={has_any_goal}")
         from .suggestion_calculator import calculate_suggestion_for_all
-        suggestion = calculate_suggestion_for_all(self.characters)
+        suggestion = calculate_suggestion_for_all(self.characters, self.global_suggestion_settings)
         if not suggestion:
+            print("[DEBUG] No suggestion returned (all goals completed)")
             self.suggestion_text.configure(text="所有目标已完成！恭喜！")
             return
 
@@ -540,11 +571,16 @@ class ActivityFrame(ctk.CTkFrame):
             f"预计剩余总收入: {suggestion.estimated_total_income:,} 人民币\n"
             f"\n{suggestion.recommendation}"
         )
+        print(f"[DEBUG] Showing suggestion: {text[:100]}...")
         self.suggestion_text.configure(text=text)
+        print("[DEBUG] Done")
 
     def save_data(self):
         """Save all data to persistence"""
-        self.persistence.save_characters(self.characters)
+        print(f"[DEBUG] save_data called, {len(self.characters)} characters to save")
+        print(f"[DEBUG] global_suggestion_settings: {self.global_suggestion_settings}")
+        self.persistence.save_characters(self.characters, self.global_suggestion_settings)
+        print("[DEBUG] Save completed")
 
 
 class AddCharacterDialog(ctk.CTkToplevel):
@@ -575,17 +611,23 @@ class AddCharacterDialog(ctk.CTkToplevel):
         ctk.CTkButton(
             btn_frame,
             text="取消",
-            command=self.destroy,
+            command=self.cancel,
             width=80,
             fg_color="#888888",
             hover_color="#666666"
         ).pack(side="left", padx=5)
 
+    def cancel(self):
+        """Cancel and close dialog"""
+        # Delay release/destroy to let Tkinter process events properly
+        self.after(10, lambda: [self.grab_release(), self.destroy()])
+
     def confirm(self):
         name = self.name_entry.get()
         if name.strip():
             self.callback(name.strip())
-            self.destroy()
+            # Delay release/destroy to let Tkinter process events properly
+            self.after(10, lambda: [self.grab_release(), self.destroy()])
 
 
 class SetGoalDialog(ctk.CTkToplevel):
@@ -595,7 +637,6 @@ class SetGoalDialog(ctk.CTkToplevel):
         super().__init__(parent)
         self.callback = callback
         self.activity_type = activity_type
-
         value_name = "银币数量" if activity_type == ActivityType.GRINDING else "成功数量"
 
         self.title("设置目标")
@@ -647,11 +688,16 @@ class SetGoalDialog(ctk.CTkToplevel):
         ctk.CTkButton(
             btn_frame,
             text="取消",
-            command=self.destroy,
+            command=self.cancel,
             width=80,
             fg_color="#888888",
             hover_color="#666666"
         ).pack(side="left", padx=5)
+
+    def cancel(self):
+        """Cancel and close dialog"""
+        # Delay release/destroy to let Tkinter process events properly
+        self.after(10, lambda: [self.grab_release(), self.destroy()])
 
     def confirm(self):
         try:
@@ -659,13 +705,15 @@ class SetGoalDialog(ctk.CTkToplevel):
             target_duration = int(self.duration_entry.get() or "0")
             total_income = int(self.income_entry.get() or "0")
             self.callback(self.activity_type, target_value, target_duration, total_income)
-            self.destroy()
+            # Delay release/destroy to let Tkinter process events properly
+            self.after(10, lambda: [self.grab_release(), self.destroy()])
         except ValueError:
             pass
 
     def clear(self):
         self.callback(self.activity_type, 0, 0, 0)
-        self.destroy()
+        # Delay release/destroy to let Tkinter process events properly
+        self.after(10, lambda: [self.grab_release(), self.destroy()])
 
 
 class AddRecordDialog(ctk.CTkToplevel):
@@ -675,7 +723,6 @@ class AddRecordDialog(ctk.CTkToplevel):
         super().__init__(parent)
         self.callback = callback
         self.activity_type = activity_type
-
         value_name = "银币数量" if activity_type == ActivityType.GRINDING else "成功数量"
         default_value = 1000000 if activity_type == ActivityType.GRINDING else 1
 
@@ -713,11 +760,16 @@ class AddRecordDialog(ctk.CTkToplevel):
         ctk.CTkButton(
             btn_frame,
             text="取消",
-            command=self.destroy,
+            command=self.cancel,
             width=80,
             fg_color="#888888",
             hover_color="#666666"
         ).pack(side="left", padx=5)
+
+    def cancel(self):
+        """Cancel and close dialog"""
+        # Delay release/destroy to let Tkinter process events properly
+        self.after(10, lambda: [self.grab_release(), self.destroy()])
 
     def confirm(self):
         try:
@@ -725,7 +777,8 @@ class AddRecordDialog(ctk.CTkToplevel):
             duration = int(self.duration_entry.get())
             if value >= 0 and duration >= 0:
                 self.callback(self.activity_type, value, duration)
-                self.destroy()
+                # Delay release/destroy to let Tkinter process events properly
+                self.after(10, lambda: [self.grab_release(), self.destroy()])
         except ValueError:
             pass
 
@@ -757,8 +810,8 @@ class SuggestionSettingsDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(scrollable_frame, text="同时可进行蹲星活动数量", font=ctk.CTkFont(size=14)).pack(pady=(10, 5))
         self.star_concurrent_entry = ctk.CTkEntry(scrollable_frame, width=300)
-        self.star_concurrent_entry.insert(0, str(current_settings.star_waiting_concurrent))
         self.star_concurrent_entry.pack(pady=5)
+        self.star_concurrent_entry.insert(0, str(current_settings.star_waiting_concurrent))
 
         ctk.CTkLabel(scrollable_frame, text="切换活动需要时间(分钟)", font=ctk.CTkFont(size=14)).pack(pady=(10, 5))
         self.switch_entry = ctk.CTkEntry(scrollable_frame, width=300)
@@ -778,21 +831,38 @@ class SuggestionSettingsDialog(ctk.CTkToplevel):
         ctk.CTkButton(
             btn_frame,
             text="取消",
-            command=self.destroy,
+            command=self.cancel,
             width=80,
             fg_color="#888888",
             hover_color="#666666"
         ).pack(side="left", padx=5)
 
+    def cancel(self):
+        """Cancel and close dialog"""
+        # Delay release/destroy to let Tkinter process events properly
+        self.after(10, lambda: [self.grab_release(), self.destroy()])
+
     def save(self):
+        print("[DEBUG] SuggestionSettingsDialog.save called")
         try:
+            daily = float(self.daily_total_entry.get())
+            grinding = int(self.grinding_concurrent_entry.get())
+            star = int(self.star_concurrent_entry.get())
+            switch = int(self.switch_entry.get())
+            print(f"[DEBUG] Input values: daily={daily}, grinding={grinding}, star={star}, switch={switch}")
             new_settings = SuggestionUserSettings(
-                daily_total_hours=float(self.daily_total_entry.get()),
-                grinding_concurrent=int(self.grinding_concurrent_entry.get()),
-                star_waiting_concurrent=int(self.star_concurrent_entry.get()),
-                switch_minutes=int(self.switch_entry.get())
+                daily_total_hours=daily,
+                grinding_concurrent=grinding,
+                star_waiting_concurrent=star,
+                switch_minutes=switch
             )
+            print("[DEBUG] Created new_settings, calling callback")
             self.callback(new_settings)
-            self.destroy()
-        except ValueError:
+            print("[DEBUG] Callback done, scheduling release/destroy")
+            # Delay release/destroy to let Tkinter process events properly
+            self.after(10, lambda: [self.grab_release(), self.destroy()])
+            print("[DEBUG] Scheduled")
+        except ValueError as e:
+            print(f"[DEBUG] ValueError: {e}, keep dialog open")
+            # Invalid input - let user correct it, do not close dialog
             pass

@@ -74,7 +74,24 @@ class DesktopReminderWindow:
         )
         self.canvas.pack(fill="both", expand=True)
 
-        # Draw circular placeholder
+        # Speech bubble drawn on main canvas (same window)
+        self.bubble_visible = False
+        self.bubble_message = ""
+        self.bubble_has_button = False
+        self.bubble_button_text = "知道了"
+        self.context_menu: Optional[ctk.CTkToplevel] = None
+        self.last_reminder_type: Optional[str] = None
+        self.reminder_shown = False
+        # Track which day we've already reminded for daily reminders
+        from datetime import date
+        self.last_reminded_date: Optional[date] = None
+        self.daily_reminded_flags = {
+            "00:00": False,
+            "18:00": False,
+            "meal": False,
+        }
+
+        # Draw circle now after all initialization
         self.draw_circle()
 
         # Bind mouse events for dragging
@@ -84,19 +101,13 @@ class DesktopReminderWindow:
         # Right click to show context menu
         self.canvas.bind('<Button-3>', self.show_context_menu)
 
-        # Speech bubble (hidden by default)
-        self.bubble: Optional[ctk.CTkToplevel] = None
-        self.context_menu: Optional[ctk.CTkToplevel] = None
-        self.last_reminder_type: Optional[str] = None
-        self.reminder_shown = False
-
         # Start timer check
         self.check_time()
         # Random small talk timer (every 15-30 minutes)
         self.schedule_random_talk()
 
     def draw_circle(self):
-        """Draw the circular placeholder"""
+        """Draw the circular placeholder, and draw bubble if visible"""
         self.canvas.delete("all")
         # Draw gradient-like circle
         self.canvas.create_oval(
@@ -113,6 +124,9 @@ class DesktopReminderWindow:
             fill="white",
             font=("Arial", 18, "bold")
         )
+        # Draw bubble if visible
+        if self.bubble_visible:
+            self._draw_bubble_on_canvas()
 
     def on_start_drag(self, event):
         """Start dragging the window"""
@@ -139,29 +153,8 @@ class DesktopReminderWindow:
 
         self.window.geometry(f"+{x}+{y}")
 
-        # If bubble is visible, move it along with the circle
-        if self.bubble is not None and hasattr(self.bubble, 'winfo_exists') and self.bubble.winfo_exists():
-            self.reposition_bubble()
-
-    def reposition_bubble(self):
-        """Reposition bubble to follow current circle position"""
-        if self.bubble is None or not hasattr(self.bubble, 'winfo_exists') or not self.bubble.winfo_exists():
-            return
-
-        # Get current circle position
-        win_x = self.window.winfo_x()
-        win_y = self.window.winfo_y()
-        win_w = self.window.winfo_width()
-        win_h = self.window.winfo_height()
-
-        # Recalculate bubble position
-        bubble_width = 280
-        bubble_height = 120
-        bubble_x = win_x + (win_w - bubble_width) // 2
-        bubble_y = win_y - bubble_height - 20
-
-        # Update bubble geometry
-        self.bubble.geometry(f"{bubble_width}x{bubble_height}+{bubble_x}+{bubble_y}")
+        # Bubble is on same canvas, so it automatically moves with the window
+        # No need to reposition separately
 
     def toggle_visibility(self, event):
         """Toggle window visibility on double click"""
@@ -172,185 +165,284 @@ class DesktopReminderWindow:
             self.window.withdraw()
 
     def show_bubble(self, message: str, has_button: bool = False, button_text: str = "知道了"):
-        """Show speech bubble with message - positioned above current circle position"""
+        """Show speech bubble with message - drawn on main canvas above the circle"""
         # Close existing bubble
-        if self.bubble is not None:
-            try:
-                self.bubble.destroy()
-            except:
-                pass
+        self.close_bubble()
 
-        # Get current circle position
-        win_x = self.window.winfo_x()
-        win_y = self.window.winfo_y()
-        win_w = self.window.winfo_width()
-        win_h = self.window.winfo_height()
-
-        # Bubble width fixed, calculate dynamic height based on content
-        bubble_width = 280
-        # Estimate number of lines: count explicit newlines + estimate wrapped lines
-        import math
-        explicit_lines = message.count('\n') + 1
-        # Each line after wrapping is about (bubble_width - 30) / average char width
-        avg_chars_per_line = (bubble_width - 30) // 10
-        wrapped_lines = math.ceil(len(message) / avg_chars_per_line) if message else 1
-        estimated_lines = max(explicit_lines, wrapped_lines)
-        # Calculate height: base padding + estimated text lines + button space if needed
-        line_height = 22
-        base_height = 30  # top/bottom padding
-        button_height = 40 if has_button else 0
-        bubble_height = base_height + estimated_lines * line_height + button_height
-        # Minimum height
-        bubble_height = max(bubble_height, 100)
-        # Maximum height to prevent too big
-        bubble_height = min(bubble_height, 350)
-
-        # Position bubble centered above the circle
-        bubble_x = win_x + (win_w - bubble_width) // 2
-        bubble_y = win_y - bubble_height - 20  # 20px gap above circle
-
-        # Create new bubble window with transparent background
-        self.bubble = ctk.CTkToplevel(self.window)
-        self.bubble.title("提醒")
-        self.bubble.overrideredirect(True)
-        if self.bubble_always_top:
-            self.bubble.attributes('-topmost', True)
-        self.bubble.attributes('-transparentcolor', '#1a1a1a')
-        self.bubble.geometry(f"{bubble_width}x{bubble_height}+{bubble_x}+{bubble_y}")
-
-        # Also prevent bubble from stealing focus if needed
-        if not self.click_steals_focus:
-            try:
-                import ctypes
-                from ctypes import wintypes
-                GWL_EXSTYLE = -20
-                WS_EX_NOACTIVATE = 0x08000000
-                hwnd = self.bubble.winfo_id()
-                style = ctypes.windll.user32.GetWindowLongW(wintypes.HWND(hwnd), GWL_EXSTYLE)
-                style |= WS_EX_NOACTIVATE
-                ctypes.windll.user32.SetWindowLongW(wintypes.HWND(hwnd), GWL_EXSTYLE, style)
-            except:
-                pass
-
-        # Create bubble canvas to draw bubble shape with tail pointing to circle
-        bubble_canvas = Canvas(
-            self.bubble,
-            width=bubble_width,
-            height=bubble_height,
-            bg='#1a1a1a',
-            highlightthickness=0,
-            bd=0
-        )
-        bubble_canvas.pack(fill="both", expand=True)
-
-        # Draw bubble shape (rounded rectangle with pointed tail)
-        # We need to create rounded rectangle manually for canvas
-        # Draw main body - larger radius creates cloud-like rounded corners
-        self._draw_rounded_rect(bubble_canvas, 5, 5, bubble_width-5, bubble_height-25, "#252525", "#444444")
-
-        # Draw tail pointing down to the circle - slightly wider for more natural look
-        tail_points = [
-            bubble_width // 2 - 10, bubble_height - 25,
-            bubble_width // 2, bubble_height - 8,
-            bubble_width // 2 + 10, bubble_height - 25,
-        ]
-        bubble_canvas.create_polygon(
-            tail_points,
-            fill="#252525",
-            outline="#444444",
-            width=1
-        )
-
-        # Add text frame
-        text_frame = ctk.CTkFrame(
-            bubble_canvas,
-            fg_color="#252525",
-            corner_radius=0
-        )
-        text_frame.place(x=12, y=8, relwidth=0.92)
-
-        label = ctk.CTkLabel(
-            text_frame,
-            text=message,
-            font=ctk.CTkFont(family="Microsoft YaHei", size=14),
-            wraplength=bubble_width - 30,
-            text_color="#ffffff",
-            justify="center"
-        )
-        label.pack(padx=5, pady=(0, 5))
-
-        # Add confirm button if needed
-        if has_button:
-            btn = ctk.CTkButton(
-                text_frame,
-                text=button_text,
-                command=self.close_bubble,
-                width=80,
-                corner_radius=8
-            )
-            btn.pack(pady=(5, 0))
-
-        # Click anywhere to close
-        bubble_canvas.bind('<Button-1>', lambda e: self.close_bubble())
-
+        # Store bubble state
+        self.bubble_visible = True
+        self.bubble_message = message
+        self.bubble_has_button = has_button
+        self.bubble_button_text = button_text
         self.reminder_shown = True
 
+        # Redraw canvas to show bubble
+        self.draw_circle()
+
+        # Bind click to close when clicking anywhere
+        self.canvas.bind('<Button-1>', self._on_canvas_click)
+
     def _draw_rounded_rect(self, canvas, x1, y1, x2, y2, fill, outline):
-        """Draw rounded rectangle on canvas - large radius for cloud/bubble-like shape"""
-        radius = 20  # Larger radius for more cloud-like appearance
-        # Draw the main rectangle
-        canvas.create_rectangle(x1+radius, y1, x2-radius, y2, fill=fill, outline="")
-        canvas.create_rectangle(x1, y1+radius, x2, y2-radius, fill=fill, outline="")
-        # Draw the four corners - larger radius makes it more cloud-like
-        canvas.create_oval(x1, y1, x1+radius*2, y1+radius*2, fill=fill, outline="")
-        canvas.create_oval(x2-radius*2, y1, x2, y1+radius*2, fill=fill, outline="")
-        canvas.create_oval(x1, y2-radius*2, x1+radius*2, y2, fill=fill, outline="")
-        canvas.create_oval(x2-radius*2, y2-radius*2, x2, y2, fill=fill, outline="")
-        # Draw the outline
-        canvas.create_line(x1+radius, y1, x2-radius, y1, fill=outline, width=1)
-        canvas.create_line(x1+radius, y2, x2-radius, y2, fill=outline, width=1)
-        canvas.create_line(x1, y1+radius, x1, y2-radius, fill=outline, width=1)
-        canvas.create_line(x2, y1+radius, x2, y2-radius, fill=outline, width=1)
+        """Draw natural cloud-like shape with randomly sized bumps along all edges"""
+        # Fill the main rectangle first
+        canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline="")
+
+        # Add random-sized bumps along each edge to create natural cloud shape
+        import random
+        bump_min = 6
+        bump_max = 14
+
+        # Top edge - add bumps upward
+        width = x2 - x1
+        steps = int(width / 25)  # One bump every ~25px
+        for i in range(steps + 1):
+            x_center = x1 + int(width * i / steps)
+            bump_size = random.randint(bump_min, bump_max)
+            canvas.create_oval(
+                x_center - bump_size, y1 - bump_size,
+                x_center + bump_size, y1 + bump_size,
+                fill=fill, outline=""
+            )
+
+        # Bottom edge - add bumps downward
+        for i in range(steps + 1):
+            x_center = x1 + int(width * i / steps)
+            bump_size = random.randint(bump_min, bump_max)
+            canvas.create_oval(
+                x_center - bump_size, y2 - bump_size,
+                x_center + bump_size, y2 + bump_size,
+                fill=fill, outline=""
+            )
+
+        # Left edge - add bumps leftward (skip corners already done)
+        height = y2 - y1
+        steps = int(height / 25)
+        for i in range(1, steps):
+            y_center = y1 + int(height * i / steps)
+            bump_size = random.randint(bump_min, bump_max)
+            canvas.create_oval(
+                x1 - bump_size, y_center - bump_size,
+                x1 + bump_size, y_center + bump_size,
+                fill=fill, outline=""
+            )
+
+        # Right edge - add bumps rightward
+        for i in range(1, steps):
+            y_center = y1 + int(height * i / steps)
+            bump_size = random.randint(bump_min, bump_max)
+            canvas.create_oval(
+                x2 - bump_size, y_center - bump_size,
+                x2 + bump_size, y_center + bump_size,
+                fill=fill, outline=""
+            )
+
+        # Add extra larger bumps at the four corners
+        corner_bump = 18
+        # Top-left
+        canvas.create_oval(x1 - corner_bump, y1 - corner_bump,
+                          x1 + corner_bump//2, y1 + corner_bump//2,
+                          fill=fill, outline="")
+        # Top-right
+        canvas.create_oval(x2 - corner_bump//2, y1 - corner_bump,
+                          x2 + corner_bump, y1 + corner_bump//2,
+                          fill=fill, outline="")
+        # Bottom-left
+        canvas.create_oval(x1 - corner_bump, y2 - corner_bump//2,
+                          x1 + corner_bump//2, y2 + corner_bump,
+                          fill=fill, outline="")
+        # Bottom-right
+        canvas.create_oval(x2 - corner_bump//2, y2 - corner_bump//2,
+                          x2 + corner_bump, y2 + corner_bump,
+                          fill=fill, outline="")
+
+        # Draw a light outline around the whole shape for definition
+        # We just draw the main rectangle outline, the bumps extend beyond it
+        canvas.create_rectangle(x1, y1, x2, y2, fill="", outline=outline, width=1)
+
+    def _draw_bubble_on_canvas(self):
+        """Draw bubble directly on main canvas, positioned above the circle"""
+        # Bubble dimensions - fixed width, dynamic height based on content
+        bubble_width = 280
+        # Calculate dynamic height based on content
+        import math
+        message = self.bubble_message
+        explicit_lines = message.count('\n') + 1
+        avg_chars_per_line = (bubble_width - 40) // 10
+        wrapped_lines = math.ceil(len(message) / avg_chars_per_line) if message else 1
+        estimated_lines = max(explicit_lines, wrapped_lines)
+        line_height = 22
+        base_height = 20
+        button_height = 40 if self.bubble_has_button else 0
+        bubble_height = base_height + estimated_lines * line_height + button_height + 20
+        bubble_height = max(bubble_height, 80)
+        bubble_height = min(bubble_height, 300)
+
+        # Position bubble centered above the circle
+        # Circle is from (10,10) to (140,140) in canvas coordinates
+        bubble_x = (150 - bubble_width) // 2  # canvas is 150x150
+        bubble_y = -bubble_height  # above the canvas (canvas starts at 0,0)
+
+        # Draw bubble shape on main canvas - natural cloud-like with random bumps
+        canvas_x1 = bubble_x + 5
+        canvas_y1 = bubble_y + 5
+        canvas_x2 = bubble_x + bubble_width - 5
+        canvas_y2 = bubble_y + bubble_height - 20  # leave space for tail
+        self._draw_rounded_rect(self.canvas, canvas_x1, canvas_y1, canvas_x2, canvas_y2, "#3a3a3a", "#666666")
+
+        # Draw tail pointing down to the circle
+        tail_center_x = bubble_x + bubble_width // 2
+        tail_base_y = bubble_y + bubble_height - 20
+        tail_tip_y = bubble_y + bubble_height - 5
+        tail_points = [
+            tail_center_x - 12, tail_base_y,
+            tail_center_x - 4, tail_base_y + 4,
+            tail_center_x, tail_tip_y,
+            tail_center_x + 4, tail_base_y + 4,
+            tail_center_x + 12, tail_base_y,
+        ]
+        self.canvas.create_polygon(
+            tail_points,
+            fill="#3a3a3a",
+            outline="#666666",
+            width=1,
+            tags="bubble"
+        )
+
+        # Draw text
+        # Use canvas create_text because we can't have widgets on canvas - simpler
+        # Center text horizontally
+        current_y = bubble_y + 18
+        lines = message.split('\n')
+        for line in lines:
+            self.canvas.create_text(
+                bubble_x + bubble_width // 2,
+                current_y,
+                text=line,
+                fill="#f0f0f0",
+                font=("Microsoft YaHei", 14),
+                justify="center",
+                tags="bubble"
+            )
+            current_y += 22
+
+        # Draw button rectangle if needed (we can't have CTkButton on canvas, just draw it)
+        if self.bubble_has_button:
+            btn_y = current_y + 8
+            btn_h = 30
+            btn_w = 80
+            btn_x = bubble_x + (bubble_width - btn_w) // 2
+            # Button background
+            self.canvas.create_rectangle(
+                btn_x, btn_y, btn_x + btn_w, btn_y + btn_h,
+                fill="#555555",
+                outline="#777777",
+                radius=8,
+                tags=("bubble", "bubble_button")
+            )
+            # Button text
+            self.canvas.create_text(
+                btn_x + btn_w // 2,
+                btn_y + btn_h // 2,
+                text=self.bubble_button_text,
+                fill="#ffffff",
+                font=("Microsoft YaHei", 12),
+                tags="bubble"
+            )
+
+    def _on_canvas_click(self, event):
+        """Handle click on canvas - close bubble if clicked, detect button click"""
+        # If button exists and click is on button, close bubble
+        if self.bubble_has_button:
+            # Check if click is on the button area
+            # Recalculate button position same as in _draw_bubble_on_canvas
+            bubble_width = 280
+            message = self.bubble_message
+            import math
+            explicit_lines = message.count('\n') + 1
+            avg_chars_per_line = (bubble_width - 40) // 10
+            wrapped_lines = math.ceil(len(message) / avg_chars_per_line) if message else 1
+            estimated_lines = max(explicit_lines, wrapped_lines)
+            line_height = 22
+            base_height = 20
+            button_height = 40 if self.bubble_has_button else 0
+            bubble_height = base_height + estimated_lines * line_height + button_height + 20
+            bubble_height = max(bubble_height, 80)
+            bubble_height = min(bubble_height, 300)
+            bubble_x = (150 - bubble_width) // 2
+            bubble_y = -bubble_height
+
+            btn_h = 30
+            btn_w = 80
+            current_y = bubble_y + 18 + estimated_lines * 22 + 8
+            btn_y = current_y
+            btn_x = bubble_x + (bubble_width - btn_w) // 2
+
+            # Check if click is inside button
+            if (btn_x <= event.x <= btn_x + btn_w and
+                btn_y <= event.y <= btn_y + btn_h):
+                # Clicked button, close
+                self.close_bubble()
+                return
+
+        # Any click on bubble area closes it
+        self.close_bubble()
 
     def close_bubble(self):
         """Close the speech bubble"""
-        if self.bubble is not None:
-            self.bubble.destroy()
-            self.bubble = None
+        if self.bubble_visible:
+            self.bubble_visible = False
+            self.bubble_message = ""
             self.reminder_shown = False
+            # Redraw to remove bubble
+            self.draw_circle()
+            # Restore original bindings
+            self.canvas.bind('<Button-1>', self.on_start_drag)
+            self.canvas.bind('<B1-Motion>', self.on_drag)
 
     def check_time(self):
         """Check current time and trigger scheduled reminders"""
         now = datetime.now()
+        today = now.date()
         hour = now.hour
         minute = now.minute
+
+        # Reset daily reminder flags when date changes
+        if self.last_reminded_date != today:
+            # New day, reset all daily reminder flags
+            self.daily_reminded_flags["00:00"] = False
+            self.daily_reminded_flags["18:00"] = False
+            self.daily_reminded_flags["meal"] = False
+            self.last_reminded_date = today
 
         triggered = False
         message = ""
         has_button = False
 
         # 00:00 - remind open overtime machine
-        if hour == 0 and 0 <= minute < 8 and not self.reminder_shown:
+        if hour == 0 and 0 <= minute < 8 and not self.daily_reminded_flags["00:00"]:
             message = "📅 已经到零点啦\n记得打开加班机开始肝了哦！"
             has_button = True
             triggered = True
+            self.daily_reminded_flags["00:00"] = True
             # Schedule second reminder if not confirmed
             self.root.after(5 * 60 * 1000, lambda: self.check_second_reminder("00:00"))
 
         # 18:00 - remind start streaming
-        elif hour == 18 and 0 <= minute < 8 and not self.reminder_shown:
+        elif hour == 18 and 0 <= minute < 8 and not self.daily_reminded_flags["18:00"]:
             message = "🎬 到开播时间啦\n记得开播打渔哦！"
             has_button = True
             triggered = True
+            self.daily_reminded_flags["18:00"] = True
             # Schedule second reminder if not confirmed
             self.root.after(5 * 60 * 1000, lambda: self.check_second_reminder("18:00"))
 
-        # Meal time reminders
+        # Meal time reminders (breakfast 7:00-7:30, lunch 12:00-12:30, dinner 18:30-19:00)
         elif (hour == 12 and 0 <= minute < 30) or (hour == 18 and 30 <= minute < 60) or (hour == 7 and 0 <= minute < 30):
-            if not self.reminder_shown or self.last_reminder_type != "meal":
+            if not self.daily_reminded_flags["meal"] or self.last_reminder_type != "meal":
                 message = "🍚 到饭点了哦\n记得放下鱼竿去吃饭\n多喝水，多走动！"
                 triggered = True
                 self.last_reminder_type = "meal"
+                # Don't set the flag immediately, allow multiple meal reminders in one day
 
         # Every two hours - remind rest
         elif minute == 0 and not triggered:
@@ -399,7 +491,7 @@ class DesktopReminderWindow:
             except:
                 pass
 
-        # Get click position for menu placement
+        # Get click position for menu placement - screen coordinates
         click_x = self.window.winfo_x() + event.x
         click_y = self.window.winfo_y() + event.y
 
@@ -408,31 +500,8 @@ class DesktopReminderWindow:
         self.context_menu.title("菜单")
         self.context_menu.overrideredirect(True)
         self.context_menu.attributes('-topmost', True)
-        # Position menu at click point
-        self.context_menu.geometry(f"180x-auto+{click_x}+{click_y}")
-        # Also prevent context menu from stealing focus
-        if not self.click_steals_focus:
-            try:
-                import ctypes
-                from ctypes import wintypes
-                GWL_EXSTYLE = -20
-                WS_EX_NOACTIVATE = 0x08000000
-                hwnd = self.context_menu.winfo_id()
-                style = ctypes.windll.user32.GetWindowLongW(wintypes.HWND(hwnd), GWL_EXSTYLE)
-                style |= WS_EX_NOACTIVATE
-                ctypes.windll.user32.SetWindowLongW(wintypes.HWND(hwnd), GWL_EXSTYLE, style)
-            except:
-                pass
 
-        # Menu container
-        menu_frame = ctk.CTkFrame(
-            self.context_menu,
-            fg_color="#252525",
-            corner_radius=8
-        )
-        menu_frame.pack(fill="both", expand=True, padx=2, pady=2)
-
-        # Menu items - add new items here easily
+        # Count menu items to calculate estimated height
         focus_text = "✅ 点击不抢焦点" if not self.click_steals_focus else "❌ 点击抢焦点"
         top_text = "✅ 气泡始终置顶" if self.bubble_always_top else "❌ 气泡不强制置顶"
         menu_items = [
@@ -443,6 +512,32 @@ class DesktopReminderWindow:
             ("👁️ 切换显示", self.toggle_visibility_menu),
             ("🔄 弹出随机鼓励", self.trigger_random_message),
         ]
+        # Calculate height: each item ~36px + padding
+        menu_height = len(menu_items) * 36 + 8
+        menu_width = 180
+        # Position menu so it opens to the side of the click, keep inside screen
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        # Adjust if menu would go outside screen
+        if click_x + menu_width > screen_width:
+            click_x = screen_width - menu_width - 5
+        if click_y + menu_height > screen_height:
+            click_y = click_y - menu_height
+
+        # Set explicit size (no auto - Tkinter doesn't handle auto correctly)
+        self.context_menu.geometry(f"{menu_width}x{menu_height}+{click_x}+{click_y}")
+
+        # Context menu needs to be clickable, don't set NOACTIVATE
+        # Even if main window doesn't steal focus, menu must accept clicks
+        # After clicking, menu closes anyway - focus doesn't stay on menu
+
+        # Menu container
+        menu_frame = ctk.CTkFrame(
+            self.context_menu,
+            fg_color="#252525",
+            corner_radius=8
+        )
+        menu_frame.pack(fill="both", expand=True, padx=2, pady=2)
 
         # Add each menu item
         for text, callback in menu_items:
@@ -460,12 +555,9 @@ class DesktopReminderWindow:
 
         # Close menu when clicking elsewhere
         def close_on_click_outside(event):
-            # Check if click is inside menu
-            x, y = event.x, event.y
-            if 0 <= x <= self.context_menu.winfo_width() and 0 <= y <= self.context_menu.winfo_height():
-                return
-            self.close_context_menu()
-
+            # After click, check if we need to close
+            # Schedule check after click processing
+            self.context_menu.after(100, self._check_close_context)
         self.context_menu.bind('<Button-1>', close_on_click_outside)
 
     def close_context_menu(self):
@@ -476,6 +568,12 @@ class DesktopReminderWindow:
             except:
                 pass
             self.context_menu = None
+
+    def _check_close_context(self):
+        """Check if click is outside context menu, close if yes"""
+        # This is needed because with WS_EX_NOACTIVATE we can't get correct event coordinates
+        # For our usage, any click anywhere should close the menu
+        self.close_context_menu()
 
     def execute_menu(self, callback):
         """Execute menu callback then close menu"""
@@ -599,15 +697,7 @@ def toggle_focus_mode(self):
             # Remove NOACTIVATE flag - allow stealing focus
             style &= ~WS_EX_NOACTIVATE
         ctypes.windll.user32.SetWindowLongW(wintypes.HWND(hwnd), GWL_EXSTYLE, style)
-        # Also update for bubble if exists
-        if self.bubble and hasattr(self.bubble, 'winfo_id'):
-            bubble_hwnd = self.bubble.winfo_id()
-            bubble_style = ctypes.windll.user32.GetWindowLongW(wintypes.HWND(bubble_hwnd), GWL_EXSTYLE)
-            if not self.click_steals_focus:
-                bubble_style |= WS_EX_NOACTIVATE
-            else:
-                bubble_style &= ~WS_EX_NOACTIVATE
-            ctypes.windll.user32.SetWindowLongW(wintypes.HWND(bubble_hwnd), GWL_EXSTYLE, bubble_style)
+        # Bubble is now on same window, no need to update separately
     except:
         # If not on Windows or API fails, just continue
         pass
@@ -622,19 +712,14 @@ def toggle_focus_mode(self):
 DesktopReminderWindow.toggle_focus_mode = toggle_focus_mode
 
 def toggle_bubble_top(self):
-    """Toggle whether bubble is always on top of other windows"""
+    """Toggle whether bubble is always on top of other windows
+    Now that bubble is on same canvas as main window, this setting doesn't matter anymore
+    Main window is always topmost, so bubble is always top
+    """
     self.bubble_always_top = not self.bubble_always_top
     # Close menu after toggling
     self.close_context_menu()
-    # If bubble is open, recreate it to apply new setting
-    if self.bubble is not None:
-        current_message = self.bubble.winfo_children()[0].winfo_children()[0].cget("text") if self.bubble else None
-        if current_message:
-            self.show_bubble(current_message)
-    # Show status
-    if self.bubble_always_top:
-        self.show_bubble("当前设置：气泡始终置顶✓")
-    else:
-        self.show_bubble("当前设置：气泡不强制置顶\n可能被其他窗口覆盖")
+    # Bubble is on same window which is always topmost, so this setting has no effect now
+    self.show_bubble("气泡与模型同窗口\n始终置顶，设置不生效")
 
 DesktopReminderWindow.toggle_bubble_top = toggle_bubble_top

@@ -4,20 +4,23 @@ from core.models import (
 )
 
 
-def calculate_suggestion_for_all(characters: list[ActivityCharacter]) -> ActivitySuggestion | None:
+def calculate_suggestion_for_all(characters: list[ActivityCharacter], global_settings: SuggestionUserSettings = None) -> ActivitySuggestion | None:
     """Calculate activity suggestion for all characters combined based on total remaining work"""
     # Aggregate remaining work across all characters
     remaining = get_remaining_all(characters)
     if remaining['total_grinding_remaining_value'] == 0 and remaining['total_star_remaining_value'] == 0:
         return None
 
-    # Use the first character's settings (users should keep settings consistent across characters)
-    # If no characters with settings, use defaults
-    settings = SuggestionUserSettings()
-    for char in characters:
-        if char.grinding_goal or char.star_waiting_goal:
-            settings = char.suggestion_settings
-            break
+    # Use global settings if provided, otherwise fall back to first character's settings
+    if global_settings is not None:
+        settings = global_settings
+    else:
+        # Use the first character's settings (backward compatibility)
+        settings = SuggestionUserSettings()
+        for char in characters:
+            if char.grinding_goal or char.star_waiting_goal:
+                settings = char.suggestion_settings
+                break
 
     # Calculate available time after accounting for switching
     total_available_minutes = settings.daily_total_hours * 60
@@ -238,6 +241,26 @@ def generate_recommendation(
     parts.append(days_text)
 
     if estimated_income > 0:
+        # Calculate what proportion of total remaining work will be done today
+        total_remaining_duration = 0
+        if grinding_daily > 0:
+            grinding_total_remaining = sum(
+                max(0, char.grinding_goal.target_duration - char.calculate_totals(ActivityType.GRINDING)[1])
+                for char in characters if char.grinding_goal
+            )
+            total_remaining_duration += grinding_total_remaining
+        if star_daily > 0:
+            star_total_remaining = sum(
+                max(0, char.star_waiting_goal.target_duration - char.calculate_totals(ActivityType.STAR_WAITING)[1])
+                for char in characters if char.star_waiting_goal
+            )
+            total_remaining_duration += star_total_remaining
+
+        if total_remaining_duration > 0:
+            today_total_duration = grinding_daily + star_daily
+            proportion = today_total_duration / total_remaining_duration
+            today_income = estimated_income * proportion
+            parts.append(f"完成今日建议，预计今日收入 {today_income:.0f} 人民币，")
         parts.append(f"全部完成还能获得 {estimated_income:,} 人民币收入")
 
     if remaining_grinding > 0 and remaining_star > 0:
