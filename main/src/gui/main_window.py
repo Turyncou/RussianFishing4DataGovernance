@@ -8,13 +8,14 @@ import webbrowser
 
 from data.persistence import (
     LotteryPersistence, ActivityPersistence, StoragePersistence,
-    FriendLinkPersistence, BackgroundPersistence
+    FriendLinkPersistence, BackgroundPersistence, CredentialsPersistence
 )
 from core.models import FriendLink, BackgroundConfig
 from .cat_follower import CatFollower
 from .lottery_frame import LotteryFrame
 from .activity_frame import ActivityFrame
 from .storage_frame import StorageFrame
+from .credentials_frame import CredentialsFrame
 from .background_dialog import BackgroundDialog
 from .friend_links_dialog import FriendLinksDialog
 
@@ -36,6 +37,7 @@ class MainWindow:
         self.storage_persistence = StoragePersistence(os.path.join(data_dir, 'storage.json'))
         self.friend_link_persistence = FriendLinkPersistence(os.path.join(data_dir, 'friend_links.json'))
         self.background_persistence = BackgroundPersistence(os.path.join(data_dir, 'background.json'))
+        self.credentials_persistence = CredentialsPersistence(os.path.join(data_dir, 'credentials.json'))
 
         # Setup window
         self.app.title("RF4 Data Process")
@@ -203,6 +205,19 @@ class MainWindow:
         )
         lottery_btn.pack(pady=12)
 
+        credentials_btn = ctk.CTkButton(
+            btn_container,
+            text="🔐 账号管理",
+            command=self.show_credentials,
+            width=btn_size,
+            height=btn_height,
+            font=btn_font,
+            corner_radius=12,
+            fg_color="#2c5aa0",
+            hover_color="#1a3d66"
+        )
+        credentials_btn.pack(pady=12)
+
         self.current_frame = home_frame
 
     def clear_current_content(self):
@@ -259,6 +274,23 @@ class MainWindow:
             self.lottery_persistence
         )
         self.lottery_frame.pack(fill="both", expand=True)
+
+        self.current_frame = frame
+
+    def show_credentials(self):
+        """Show account credentials manager page"""
+        # Show back button
+        self.back_button.pack(side="left", padx=(10, 0), pady=10)
+        self.clear_current_content()
+
+        frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+        frame.pack(fill="both", expand=True)
+
+        self.credentials_frame = CredentialsFrame(
+            frame,
+            self.credentials_persistence
+        )
+        self.credentials_frame.pack(fill="both", expand=True)
 
         self.current_frame = frame
 

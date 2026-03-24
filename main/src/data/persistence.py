@@ -1,11 +1,14 @@
 """Data persistence layer - handles saving and loading data from JSON files"""
 import json
 import os
+import base64
 from datetime import date
 from typing import Any, List
+from cryptography.fernet import Fernet
 from core.models import (
     LotteryPrize, ActivityRecord, ActivityCharacter, ActivityGoal, ActivityType,
-    StorageCharacter, FriendLink, BackgroundConfig, SuggestionUserSettings
+    StorageCharacter, FriendLink, BackgroundConfig, SuggestionUserSettings,
+    AccountCredential
 )
 
 
@@ -288,3 +291,86 @@ class BackgroundPersistence(DataPersistence):
             )
         except (KeyError, ValueError):
             return BackgroundConfig()
+
+
+class CredentialsPersistence(DataPersistence):
+    """Persistence for account credentials (passwords stored with Fernet symmetric encryption)"""
+
+    def __init__(self, file_path: str):
+        super().__init__(file_path)
+        # Key file is stored alongside the credentials file
+        self._key_path = file_path + '.key'
+        self._fernet = self._get_or_create_key()
+
+    def _get_or_create_key(self) -> Fernet:
+        """Get existing key from file or create a new one"""
+        if os.path.exists(self._key_path):
+            with open(self._key_path, 'rb') as f:
+                key = f.read()
+        else:
+            # Generate new Fernet key
+            key = Fernet.generate_key()
+            directory = os.path.dirname(self._key_path)
+            if directory and not os.path.exists(directory):
+                os.makedirs(directory, exist_ok=True)
+            with open(self._key_path, 'wb') as f:
+                f.write(key)
+            # Make key file readable only by the current user (on Unix-like systems)
+            try:
+                os.chmod(self._key_path, 0o600)
+            except:
+                pass  # Windows doesn't support this, ignore
+        return Fernet(key)
+
+    def _encrypt_password(self, password: str) -> str:
+        """Fernet symmetric encryption (standard secure encryption)"""
+        password_bytes = password.encode('utf-8')
+        encrypted = self._fernet.encrypt(password_bytes)
+        return encrypted.decode('utf-8')
+
+    def _decrypt_password(self, encrypted: str) -> str:
+        """Decrypt password using Fernet"""
+        try:
+            encrypted_bytes = encrypted.encode('utf-8')
+            decrypted = self._fernet.decrypt(encrypted_bytes)
+            return decrypted.decode('utf-8')
+        except:
+            return ""
+
+    def save_credentials(self, accounts: List[AccountCredential]) -> None:
+        """Save accounts to file"""
+        data = [
+            {
+                'account_name': a.account_name,
+                'encrypted_password': a.encrypted_password
+            }
+            for a in accounts
+        ]
+        self.save(data)
+
+    def load_credentials(self) -> List[AccountCredential]:
+        """Load accounts from file"""
+        data = self.load()
+        if not data:
+            return []
+
+        try:
+            accounts = []
+            for item in data:
+                account = AccountCredential(
+                    account_name=item.get('account_name', ''),
+                    encrypted_password=item.get('encrypted_password', '')
+                )
+                accounts.append(account)
+            return accounts
+        except (KeyError, ValueError):
+            return []
+
+    def add_account(self, account_name: str, plain_password: str) -> AccountCredential:
+        """Add a new account with encrypted password"""
+        encrypted = self._encrypt_password(plain_password)
+        return AccountCredential(account_name=account_name, encrypted_password=encrypted)
+
+    def get_plain_password(self, account: AccountCredential) -> str:
+        """Get decrypted plain password from account"""
+        return self._decrypt_password(account.encrypted_password)

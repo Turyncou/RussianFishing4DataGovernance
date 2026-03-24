@@ -198,3 +198,16 @@ class BackgroundConfig:
 
     def __post_init__(self):
         self.opacity = max(0.0, min(1.0, self.opacity))
+
+
+@dataclass
+class AccountCredential:
+    """Represents a stored account credential (username/password)"""
+    account_name: str    # Account display name/username
+    encrypted_password: str  # Encrypted password (base64 encoded for simple encryption)
+
+    def __post_init__(self):
+        if not self.account_name.strip():
+            raise ValueError("Account name cannot be empty")
+        if not self.encrypted_password.strip():
+            raise ValueError("Password cannot be empty")
