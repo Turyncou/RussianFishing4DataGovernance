@@ -511,36 +511,25 @@ class ActivityFrame(ctk.CTkFrame):
 
     def open_suggestion_settings(self):
         """Open global suggestion settings dialog"""
-        print(f"[DEBUG] open_suggestion_settings called (global settings)")
         def callback(new_settings):
-            print(f"[DEBUG] on_global_settings_done: new_settings={new_settings}")
             self.global_suggestion_settings = new_settings
-            print("[DEBUG] Updated global settings, saving...")
             self.save_data()
-            print("[DEBUG] Save done")
         dialog = SuggestionSettingsDialog(
             self.winfo_toplevel(),
             self.global_suggestion_settings,
             callback
         )
-        print("[DEBUG] Dialog created")
 
     def on_suggestion_settings_done(self, new_settings: SuggestionUserSettings):
         """Callback when suggestion settings updated"""
-        print(f"[DEBUG] on_suggestion_settings_done called")
-        print(f"[DEBUG] new_settings: daily={new_settings.daily_total_hours}, grinding={new_settings.grinding_concurrent}, star={new_settings.star_waiting_concurrent}, switch={new_settings.switch_minutes}")
         if not self.current_character:
-            print("[DEBUG] No current character, returning")
             return
         self.current_character.suggestion_settings = new_settings
-        print(f"[DEBUG] Updated current_character.settings")
         self.save_data()
 
     def calculate_and_show_suggestion(self):
         """Calculate and show the suggestion based on all characters"""
-        print("[DEBUG] calculate_and_show_suggestion called")
         if not self.characters:
-            print("[DEBUG] No characters, returning")
             self.suggestion_text.configure(text="没有角色，无法生成建议")
             return
 
@@ -550,15 +539,12 @@ class ActivityFrame(ctk.CTkFrame):
             for char in self.characters
         )
         if not has_any_goal:
-            print("[DEBUG] No goals set, returning")
             self.suggestion_text.configure(text="没有设置任何目标，无法生成建议\n请在各角色中设置搬砖/蹲星目标")
             return
 
-        print(f"[DEBUG] {len(self.characters)} characters, has_any_goal={has_any_goal}")
         from .suggestion_calculator import calculate_suggestion_for_all
         suggestion = calculate_suggestion_for_all(self.characters, self.global_suggestion_settings)
         if not suggestion:
-            print("[DEBUG] No suggestion returned (all goals completed)")
             self.suggestion_text.configure(text="所有目标已完成！恭喜！")
             return
 
@@ -571,16 +557,11 @@ class ActivityFrame(ctk.CTkFrame):
             f"预计剩余总收入: {suggestion.estimated_total_income:,} 人民币\n"
             f"\n{suggestion.recommendation}"
         )
-        print(f"[DEBUG] Showing suggestion: {text[:100]}...")
         self.suggestion_text.configure(text=text)
-        print("[DEBUG] Done")
 
     def save_data(self):
         """Save all data to persistence"""
-        print(f"[DEBUG] save_data called, {len(self.characters)} characters to save")
-        print(f"[DEBUG] global_suggestion_settings: {self.global_suggestion_settings}")
         self.persistence.save_characters(self.characters, self.global_suggestion_settings)
-        print("[DEBUG] Save completed")
 
 
 class AddCharacterDialog(ctk.CTkToplevel):
@@ -843,26 +824,20 @@ class SuggestionSettingsDialog(ctk.CTkToplevel):
         self.after(10, lambda: [self.grab_release(), self.destroy()])
 
     def save(self):
-        print("[DEBUG] SuggestionSettingsDialog.save called")
         try:
             daily = float(self.daily_total_entry.get())
             grinding = int(self.grinding_concurrent_entry.get())
             star = int(self.star_concurrent_entry.get())
             switch = int(self.switch_entry.get())
-            print(f"[DEBUG] Input values: daily={daily}, grinding={grinding}, star={star}, switch={switch}")
             new_settings = SuggestionUserSettings(
                 daily_total_hours=daily,
                 grinding_concurrent=grinding,
                 star_waiting_concurrent=star,
                 switch_minutes=switch
             )
-            print("[DEBUG] Created new_settings, calling callback")
             self.callback(new_settings)
-            print("[DEBUG] Callback done, scheduling release/destroy")
             # Delay release/destroy to let Tkinter process events properly
             self.after(10, lambda: [self.grab_release(), self.destroy()])
-            print("[DEBUG] Scheduled")
-        except ValueError as e:
-            print(f"[DEBUG] ValueError: {e}, keep dialog open")
+        except ValueError:
             # Invalid input - let user correct it, do not close dialog
             pass
