@@ -200,6 +200,8 @@ class DesktopReminderWindow:
         self.bubble_window.attributes('-topmost', self.bubble_always_top)
         self.bubble_window.config(bg='#1a1a1a')
         self.bubble_window.attributes('-transparentcolor', '#1a1a1a')
+        # Hide initially to avoid flash in top-left corner before position is set
+        self.bubble_window.withdraw()
 
         # Same NOACTIVATE style as main window to not steal focus
         # Also use TOOLWINDOW style + remove APPWINDOW to prevent showing in taskbar/preview
@@ -275,7 +277,8 @@ class DesktopReminderWindow:
         frame_w = frame.winfo_reqwidth()
         frame_h = frame.winfo_reqheight()
         # Extra padding at bottom to ensure full tail is visible
-        total_height = self.BUBBLE_PADDING_TOP + frame_h + self.BUBBLE_TAIL_HEIGHT + self.BUBBLE_PADDING_BOTTOM
+        # Add +2 extra pixels to make sure tip is not cut off
+        total_height = self.BUBBLE_PADDING_TOP + frame_h + self.BUBBLE_TAIL_HEIGHT + self.BUBBLE_PADDING_BOTTOM + 2
         total_width = frame_w + 4  # padding left/right
         self.bubble_window.geometry(f"{total_width}x{total_height}")
 
@@ -286,11 +289,12 @@ class DesktopReminderWindow:
         frame_bottom_y = self.BUBBLE_PADDING_TOP + frame_h + self.BUBBLE_PADDING_BOTTOM
         # Coordinates for the tail polygon - points down toward circle
         # tail covers from frame_bottom_y to frame_bottom_y + BUBBLE_TAIL_HEIGHT
+        # Leave 1px at bottom to ensure tip is not cut off
         points = [
-            tail_center_x - 10, frame_bottom_y - 2,                     # left top (connected to frame)
-            tail_center_x - 3, frame_bottom_y + (self.BUBBLE_TAIL_HEIGHT - 2), # left bottom (tip area)
-            tail_center_x + 3, frame_bottom_y + (self.BUBBLE_TAIL_HEIGHT - 2), # right bottom (tip area)
-            tail_center_x + 10, frame_bottom_y - 2,                     # right top (connected to frame)
+            tail_center_x - 10, frame_bottom_y,                     # left top (connected to frame)
+            tail_center_x - 3, frame_bottom_y + (self.BUBBLE_TAIL_HEIGHT - 3), # left bottom (tip area)
+            tail_center_x + 3, frame_bottom_y + (self.BUBBLE_TAIL_HEIGHT - 3), # right bottom (tip area)
+            tail_center_x + 10, frame_bottom_y,                     # right top (connected to frame)
         ]
         # Fill with same color as frame to blend naturally - no outline
         canvas.create_polygon(points, fill="#3a3a3a", outline="#3a3a3a", tags="bubble")
@@ -298,10 +302,19 @@ class DesktopReminderWindow:
         # Bind click to close on all elements
         canvas.bind('<Button-1>', handle_click)
 
-        # Need to delay position update - window size isn't finalized until after current event loop
-        # This fixes the "initially far away, moves closer after drag" issue
-        self.bubble_window.update_idletasks()
-        self.bubble_window.after(10, self._update_bubble_position)
+        # Content frame placement
+        frame.pack(padx=2, pady=(self.BUBBLE_PADDING_TOP, 0))  # bottom padding is handled in window total height
+
+        # Wait for window to complete layout then update position correctly
+        # This ensures we get the correct bubble height before calculating position
+        # Only show after position is set to avoid flash in top-left corner
+        def update_position():
+            self.bubble_window.update_idletasks()
+            self._update_bubble_position()
+            # Now that position is correct, show the bubble
+            self.bubble_window.deiconify()
+
+        self.bubble_window.after(20, update_position)
 
     def _on_canvas_click(self, event):
         """Handle click on canvas - close bubble if clicked, detect button click
@@ -370,6 +383,8 @@ class DesktopReminderWindow:
         """Update bubble position to follow main window when dragging
         Always keeps the tail tip at fixed distance from the model circle,
         regardless of how much content is in the bubble.
+
+        Bubble appears ABOVE the model, tail points down towards model top.
         """
         if not self.bubble_visible or not hasattr(self, 'bubble_window') or self.bubble_window is None:
             return
@@ -378,8 +393,9 @@ class DesktopReminderWindow:
         main_y = self.window.winfo_y()
         main_w = self.window.winfo_width()
         main_h = self.window.winfo_height()
-        bubble_h = self.bubble_window.winfo_height()
-        bubble_w = self.bubble_window.winfo_width()
+        bubble_h = self.bubble_window.winfo_reqheight()
+        bubble_w = self.bubble_window.winfo_reqwidth()
+
 
         # Fixed distance from circle center to bubble tail tip
         # Tail is at bottom of bubble, so bubble needs to positioned such that
@@ -518,6 +534,7 @@ class DesktopReminderWindow:
             (top_text, self.toggle_bubble_top),
             ("👁️ 切换显示", self.toggle_visibility_menu),
             ("🔄 弹出随机鼓励", self.trigger_random_message),
+            ("✖️ 关闭菜单", lambda: None),  # Just close menu
         ]
         # Calculate height: each item ~36px + padding
         menu_height = len(menu_items) * 36 + 8
@@ -607,12 +624,15 @@ class DesktopReminderWindow:
 
     def execute_menu(self, callback):
         """Execute menu callback then close menu
-        Some callbacks already close the menu themselves (toggles), so only close if still open
+        Close menu first, then execute callback to avoid focus issues with new dialogs
         """
-        callback()
-        # Only close if menu still exists
-        if self.context_menu is not None:
+        # Keep reference before closing
+        menu_was_open = self.context_menu is not None
+        # Close menu first so any new dialog opened by callback doesn't get focus errors
+        if menu_was_open:
             self.close_context_menu()
+        # Execute callback after a short delay to guarantee menu is fully destroyed
+        self.window.after(20, callback)
 
     def show_today_summary(self):
         """Show today's summary reminder"""
@@ -626,7 +646,6 @@ class DesktopReminderWindow:
         summary += "\n• 每两小时提醒休息"
 
         self.show_bubble(summary)
-        print("[DEBUG] show_bubble completed")
 
     def toggle_visibility_menu(self):
         """Toggle visibility from menu"""
