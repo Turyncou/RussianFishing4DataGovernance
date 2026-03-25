@@ -4,6 +4,7 @@ from tkinter import Canvas
 from datetime import datetime
 from typing import Optional
 import random
+import math
 
 
 # ========== 可自定义的随机鼓励话语 ==========
@@ -39,6 +40,9 @@ class DesktopReminderWindow:
         self.is_visible = True
         self.click_steals_focus = False  # 是否点击抢焦点，False = 点击不抢焦点（保持游戏焦点）
         self.bubble_always_top = True  # 气泡是否始终置顶
+        self._bubble_anim_phase = 0
+        self._bubble_anim_running = False   
+
 
         # Create independent toplevel window
         # Position at bottom-right corner by default
@@ -315,6 +319,61 @@ class DesktopReminderWindow:
             self.bubble_window.deiconify()
 
         self.bubble_window.after(20, update_position)
+        self._start_bubble_animation()
+
+    def _start_bubble_animation(self):
+        """Start floating animation"""
+        self._bubble_anim_running = True
+        self._bubble_anim_phase = 0
+        self._animate_bubble()
+
+    def _animate_bubble(self):
+        if not self._bubble_anim_running:
+            return
+
+        if not hasattr(self, 'bubble_window') or self.bubble_window is None:
+            return
+
+        # 基础位置（真实位置）
+        main_x = self.window.winfo_x()
+        main_y = self.window.winfo_y()
+        main_w = self.window.winfo_width()
+        main_h = self.window.winfo_height()
+
+        bubble_h = self.bubble_window.winfo_reqheight()
+        bubble_w = self.bubble_window.winfo_reqwidth()
+
+        # ===== 原始位置计算（你的逻辑）=====
+        circle_center_y = main_y + main_h // 2
+        circle_top_y = circle_center_y - (main_h // 2)
+        base_y = circle_top_y - self.BUBBLE_TIP_DISTANCE_FROM_MODEL - bubble_h
+
+        base_x = main_x + (main_w - bubble_w) // 2
+
+        # ===== 浮动动画 =====
+        amplitude = 6   # 浮动幅度（像素）
+        speed = 0.15    # 速度（越小越慢）
+
+        offset = math.sin(self._bubble_anim_phase) * amplitude
+        self._bubble_anim_phase += speed
+
+        final_y = int(base_y + offset)
+        final_x = int(base_x)
+
+        # 限制屏幕边界
+        screen_width = self.root.winfo_screenwidth()
+        if final_x < 0:
+            final_x = 0
+        if final_x + bubble_w > screen_width:
+            final_x = screen_width - bubble_w
+
+        if final_y < 0:
+            final_y = 0
+
+        self.bubble_window.geometry(f"+{final_x}+{final_y}")
+
+        # 下一帧（约60FPS）
+        self.root.after(16, self._animate_bubble)
 
     def _on_canvas_click(self, event):
         """Handle click on canvas - close bubble if clicked, detect button click
@@ -378,6 +437,7 @@ class DesktopReminderWindow:
                 except:
                     pass
                 self.bubble_window = None
+        self._bubble_anim_running = False
 
     def _update_bubble_position(self):
         """Update bubble position to follow main window when dragging
