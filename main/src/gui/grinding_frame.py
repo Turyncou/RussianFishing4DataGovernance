@@ -1,6 +1,6 @@
 """Grinding statistics frame"""
 import customtkinter as ctk
-from tkinter import ttk, Listbox
+from tkinter import ttk, Listbox, messagebox
 from datetime import date
 from typing import List, Optional
 import json
@@ -485,10 +485,14 @@ class AddCharacterDialog(ctk.CTkToplevel):
         ).pack(side="left", padx=5)
 
     def confirm(self):
-        name = self.name_entry.get()
+        name = self.name_entry.get().strip()
         if name.strip():
             self.callback(name.strip())
+            self.grab_release()
             self.destroy()
+        else:
+            from tkinter import messagebox
+            messagebox.showwarning("输入错误", "角色名称不能为空")
 
 
 class SetGoalDialog(ctk.CTkToplevel):
@@ -544,12 +548,19 @@ class SetGoalDialog(ctk.CTkToplevel):
 
     def confirm(self):
         try:
-            target_silver = int(self.silver_entry.get() or "0")
-            target_duration = int(self.duration_entry.get() or "0")
-            self.callback(target_silver, target_duration)
-            self.destroy()
+            target_silver = int((self.silver_entry.get() or "0").strip())
+            target_duration = int((self.duration_entry.get() or "0").strip())
+            if target_silver >= 0 and target_duration >= 0:
+                self.callback(target_silver, target_duration)
+                self.grab_release()
+                self.destroy()
+            else:
+                # Invalid values - show message
+                messagebox.showwarning("输入错误", "数值不能为负数，请重新输入")
         except ValueError:
-            pass
+            # Invalid input - show message
+            from tkinter import messagebox
+            messagebox.showwarning("输入错误", "请输入有效的数字")
 
     def clear(self):
         self.callback(0, 0)
@@ -600,13 +611,19 @@ class AddRecordDialog(ctk.CTkToplevel):
 
     def confirm(self):
         try:
-            silver = int(self.silver_entry.get())
-            duration = int(self.duration_entry.get())
+            silver = int(self.silver_entry.get().strip())
+            duration = int(self.duration_entry.get().strip())
             if silver >= 0 and duration >= 0:
                 self.callback(silver, duration)
+                self.grab_release()
                 self.destroy()
+            else:
+                # Invalid values - show message
+                messagebox.showwarning("输入错误", "数值不能为负数，请重新输入")
         except ValueError:
-            pass
+            # Invalid input - show message
+            from tkinter import messagebox
+            messagebox.showwarning("输入错误", "请输入有效的数字")
 
 
 class ApiSettingsDialog(ctk.CTkToplevel):
@@ -673,4 +690,5 @@ class ApiSettingsDialog(ctk.CTkToplevel):
             'api_key': self.key_entry.get().strip()
         }
         self.callback(new_settings)
+        self.grab_release()
         self.destroy()

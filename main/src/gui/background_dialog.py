@@ -157,4 +157,5 @@ class BackgroundDialog(ctk.CTkToplevel):
             opacity=opacity
         )
         self.callback(new_config)
+        self.grab_release()
         self.destroy()

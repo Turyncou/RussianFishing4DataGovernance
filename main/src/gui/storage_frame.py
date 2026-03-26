@@ -1,6 +1,6 @@
 """Storage duration tracking frame"""
 import customtkinter as ctk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from typing import List
 
 from core.models import StorageCharacter
@@ -152,11 +152,11 @@ class StorageFrame(ctk.CTkFrame):
         """Add a new character"""
         dialog = AddStorageCharacterDialog(self.winfo_toplevel(), self.on_add_character_done)
 
-    def on_add_character_done(self, name):
+    def on_add_character_done(self, name, minutes: int):
         """Callback after adding character"""
         if not name.strip():
             return
-        char = StorageCharacter(name.strip(), 0)
+        char = StorageCharacter(name.strip(), minutes)
         self.characters.append(char)
         self.update_table()
         self.save_data()
@@ -173,27 +173,37 @@ class StorageFrame(ctk.CTkFrame):
         """Add minutes to selected character"""
         char = self.get_selected_character()
         if not char:
+            messagebox.showwarning("提示", "请先选择一个角色")
             return
         try:
-            minutes = int(self.minutes_entry.get())
+            minutes = int(self.minutes_entry.get().strip())
+            if minutes <= 0:
+                from tkinter import messagebox
+                messagebox.showwarning("输入错误", "分钟数必须大于0")
+                return
             char.add_minutes(minutes)
             self.update_table()
             self.save_data()
         except ValueError:
-            pass
+            messagebox.showwarning("输入错误", "请输入有效的分钟数")
 
     def remove_minutes(self):
         """Remove minutes from selected character"""
         char = self.get_selected_character()
         if not char:
+            messagebox.showwarning("提示", "请先选择一个角色")
             return
         try:
-            minutes = int(self.minutes_entry.get())
+            minutes = int(self.minutes_entry.get().strip())
+            if minutes <= 0:
+                from tkinter import messagebox
+                messagebox.showwarning("输入错误", "分钟数必须大于0")
+                return
             char.remove_minutes(minutes)
             self.update_table()
             self.save_data()
         except ValueError:
-            pass
+            messagebox.showwarning("输入错误", "请输入有效的分钟数")
 
     def save_data(self):
         """Save all data to persistence"""
@@ -242,11 +252,15 @@ class AddStorageCharacterDialog(ctk.CTkToplevel):
     def confirm(self):
         name = self.name_entry.get().strip()
         if not name:
+            messagebox.showwarning("输入错误", "角色名称不能为空")
             return
         try:
-            minutes = int(self.minutes_entry.get())
+            minutes = int(self.minutes_entry.get().strip())
             # Will be clamped to >=0 by model
         except ValueError:
-            minutes = 0
-        self.callback(name)
+            messagebox.showwarning("输入错误", "请输入有效的分钟数")
+            return
+
+        self.callback(name, minutes)
+        self.grab_release()
         self.destroy()

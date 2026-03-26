@@ -6,7 +6,9 @@
       "Bash(grep -E \"\\\\.py$|\\\\.csv$|\\\\.json$|\\\\.toml$\")",
       "Bash(dir \"D:\\\\Ivy\\\\GQ\\\\lyf\\\\RussianFishing4DataGovernance\" /s /b)",
       "Bash(findstr /v \"__pycache__\")",
-      "Bash(findstr /v \".git\")"
+      "Bash(findstr /v \".git\")",
+      "Bash(dir:*)",
+      "Bash(C:\\\\Users\\\\turyn\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe example_usage.py)"
     ]
   }
 }

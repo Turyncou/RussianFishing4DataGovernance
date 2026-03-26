@@ -1,6 +1,6 @@
 """Bait/Tackle consumption tracking frame - tracks bought/used/remaining"""
 import customtkinter as ctk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from CTkMessagebox import CTkMessagebox
 from typing import List
 
@@ -321,11 +321,16 @@ class AddBaitDialog(ctk.CTkToplevel):
         """Confirm and add"""
         name = self.name_entry.get().strip()
         try:
-            initial_stock = int(self.stock_entry.get())
+            initial_stock = int(self.stock_entry.get().strip())
             if initial_stock < 0:
                 initial_stock = 0
         except ValueError:
-            initial_stock = 0
+            messagebox.showwarning("输入错误", "请输入有效的库存数量")
+            return
+
         if name:
             self.callback(name, initial_stock)
+            self.grab_release()
             self.destroy()
+        else:
+            messagebox.showwarning("输入错误", "饵料/钓具名称不能为空")

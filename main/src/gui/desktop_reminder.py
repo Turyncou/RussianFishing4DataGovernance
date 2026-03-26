@@ -1,10 +1,12 @@
 """Desktop floating reminder with circular placeholder (will replace with Live2D later)"""
 import customtkinter as ctk
-from tkinter import Canvas
+from tkinter import Canvas, messagebox
 from datetime import datetime
 from typing import Optional
 import random
 import math
+import ctypes
+from ctypes import wintypes
 
 
 # ========== 可自定义的随机鼓励话语 ==========
@@ -66,8 +68,6 @@ class DesktopReminderWindow:
         # Also use TOOLWINDOW + remove APPWINDOW to prevent showing in taskbar/preview
         try:
             # Use extended window style to prevent activation
-            import ctypes
-            from ctypes import wintypes
             GWL_EXSTYLE = -20
             WS_EX_NOACTIVATE = 0x08000000
             WS_EX_TOOLWINDOW = 0x00000080
@@ -210,8 +210,6 @@ class DesktopReminderWindow:
         # Same NOACTIVATE style as main window to not steal focus
         # Also use TOOLWINDOW style + remove APPWINDOW to prevent showing in taskbar/preview
         try:
-            import ctypes
-            from ctypes import wintypes
             GWL_EXSTYLE = -20
             WS_EX_NOACTIVATE = 0x08000000
             WS_EX_TOOLWINDOW = 0x00000080
@@ -382,7 +380,6 @@ class DesktopReminderWindow:
         # Still allow dragging when bubble is visible - check if click is outside bubble
         bubble_width = 280
         message = self.bubble_message
-        import math
         explicit_lines = message.count('\n') + 1
         avg_chars_per_line = (bubble_width - 40) // 10
         wrapped_lines = math.ceil(len(message) / avg_chars_per_line) if message else 1
@@ -789,7 +786,7 @@ class CustomReminderDialog(ctk.CTkToplevel):
     def confirm(self):
         """Confirm and schedule reminder"""
         try:
-            minutes = int(self.minutes_entry.get())
+            minutes = int(self.minutes_entry.get().strip())
             message = self.message_entry.get().strip()
             if minutes > 0 and message:
                 self.callback(minutes, message)
@@ -797,8 +794,13 @@ class CustomReminderDialog(ctk.CTkToplevel):
                 # Delay destroy to let all pending events complete first
                 # This prevents "bad window path name" error
                 self.after(10, self.destroy)
+            else:
+                if minutes <= 0:
+                    messagebox.showwarning("输入错误", "提醒分钟数必须大于0")
+                else:
+                    messagebox.showwarning("输入错误", "提醒内容不能为空")
         except ValueError:
-            pass
+            messagebox.showwarning("输入错误", "请输入有效的分钟数")
 
 
 # Add new toggle methods to DesktopReminderWindow
@@ -807,8 +809,6 @@ def toggle_focus_mode(self):
     self.click_steals_focus = not self.click_steals_focus
     # Apply the setting using Windows API
     try:
-        import ctypes
-        from ctypes import wintypes
         GWL_EXSTYLE = -20
         WS_EX_NOACTIVATE = 0x08000000
         hwnd = self.window.winfo_id()

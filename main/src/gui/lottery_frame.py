@@ -413,6 +413,7 @@ class PrizeSettingsDialog(ctk.CTkToplevel):
                 return
 
         self.callback(new_prizes)
+        self.grab_release()
         self.destroy()
 
 

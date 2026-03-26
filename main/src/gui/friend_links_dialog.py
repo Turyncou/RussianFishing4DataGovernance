@@ -179,5 +179,9 @@ class AddLinkDialog(ctk.CTkToplevel):
         """Confirm and add link"""
         text = self.text_entry.get().strip()
         url = self.url_entry.get().strip()
-        self.callback(text, url)
-        self.destroy()
+        if text and url:
+            self.callback(text, url)
+            self.grab_release()
+            self.destroy()
+        else:
+            messagebox.showwarning("输入错误", "文字说明和链接地址都不能为空")

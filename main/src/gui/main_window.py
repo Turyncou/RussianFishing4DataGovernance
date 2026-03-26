@@ -1,6 +1,8 @@
 """Main application window"""
 import sys
 import os
+import shutil
+import threading
 import customtkinter as ctk
 from PIL import Image, ImageTk
 from tkinter import Canvas, messagebox
@@ -31,47 +33,145 @@ class MainWindow:
         self.data_dir = data_dir
         self.background_image = None
         self.background_photo = None
+        self.background_original_image = None  # Cache original raw image
+        self.background_original_alpha = None  # Cache original with opacity applied
+        self.last_cached_size = (0, 0)  # Last size we rendered for
         self.background_config = None
         self.current_frame = None
+        self._resize_after_id = None  # For debouncing resize
 
-        # Initialize persistence
-        self.lottery_persistence = LotteryPersistence(os.path.join(data_dir, 'lottery.json'))
-        self.activity_persistence = ActivityPersistence(os.path.join(data_dir, 'activity.json'))
-        self.storage_persistence = StoragePersistence(os.path.join(data_dir, 'storage.json'))
-        self.bait_persistence = BaitPersistence(os.path.join(data_dir, 'bait.json'))
-        self.friend_link_persistence = FriendLinkPersistence(os.path.join(data_dir, 'friend_links.json'))
-        self.background_persistence = BackgroundPersistence(os.path.join(data_dir, 'background.json'))
-        self.credentials_persistence = CredentialsPersistence(os.path.join(data_dir, 'credentials.json'))
-
-        # Create automatic backup on startup
-        self.backup_dir = os.path.join(data_dir, 'backups')
-        os.makedirs(self.backup_dir, exist_ok=True)
-        # Keep last 10 backups automatically
-        backups = list_backups(self.backup_dir)
-        if len(backups) >= 10:
-            # Remove oldest backups beyond 10
-            for old_backup in backups[10:]:
-                old_path = os.path.join(self.backup_dir, old_backup)
-                import shutil
-                shutil.rmtree(old_path, ignore_errors=True)
-        # Create new backup
-        create_auto_backup(data_dir, self.backup_dir)
+        # All persistence instances will be initialized in background
+        self.lottery_persistence = None
+        self.activity_persistence = None
+        self.storage_persistence = None
+        self.bait_persistence = None
+        self.friend_link_persistence = None
+        self.background_persistence = None
+        self.credentials_persistence = None
 
         # Setup window
         self.app.title("RF4 Data Process")
         self.app.geometry("1200x800")
         self.app.minsize(1000, 700)
 
-        # Create main container with background canvas
+        # Create loading screen first
+        self._create_loading_screen()
+
+        # Start background loading
+        self._start_background_loading()
+
+    def _create_loading_screen(self):
+        """Create fullscreen loading screen shown during startup"""
+        # Create loading frame that covers entire window
+        self.loading_frame = ctk.CTkFrame(
+            self.app,
+            fg_color="#1a1a1a",
+            corner_radius=0
+        )
+        self.loading_frame.place(x=0, y=0, relwidth=1, relheight=1)
+
+        # Center container
+        container = ctk.CTkFrame(self.loading_frame, fg_color="transparent")
+        container.place(relx=0.5, rely=0.4, anchor="center")
+
+        # Title
+        title = ctk.CTkLabel(
+            container,
+            text="RF4 数据统计工具",
+            font=ctk.CTkFont(size=32, weight="bold")
+        )
+        title.pack(pady=(0, 30))
+
+        # Create spinning canvas
+        self.loading_canvas = ctk.CTkCanvas(
+            container,
+            width=60,
+            height=60,
+            bg="#1a1a1a",
+            highlightthickness=0
+        )
+        self.loading_canvas.pack(pady=(0, 20))
+
+        # Loading message
+        self.loading_label = ctk.CTkLabel(
+            container,
+            text="正在加载数据...",
+            font=ctk.CTkFont(size=16)
+        )
+        self.loading_label.pack()
+
+        # Animation state
+        self.loading_angle = 0
+        self.loading_animation_id = None
+        self._animate_loading()
+
+    def _animate_loading(self):
+        """Animate the spinning loading indicator"""
+        if not hasattr(self, 'loading_canvas') or not self.loading_canvas.winfo_exists():
+            return
+        self.loading_canvas.delete("spinner")
+        x0, y0, x1, y1 = 5, 5, 55, 55
+        self.loading_canvas.create_arc(
+            x0, y0, x1, y1,
+            start=self.loading_angle,
+            extent=120,
+            outline="#1f6feb",
+            width=4,
+            style="arc",
+            tags="spinner"
+        )
+        self.loading_angle = (self.loading_angle + 10) % 360
+        self.loading_animation_id = self.app.after(30, self._animate_loading)
+
+    def _start_background_loading(self):
+        """Start loading all data in background thread"""
+        def background_task():
+            # Initialize all persistence instances (this loads data from disk)
+            self.lottery_persistence = LotteryPersistence(os.path.join(self.data_dir, 'lottery.json'))
+            self.activity_persistence = ActivityPersistence(os.path.join(self.data_dir, 'activity.json'))
+            self.storage_persistence = StoragePersistence(os.path.join(self.data_dir, 'storage.json'))
+            self.bait_persistence = BaitPersistence(os.path.join(self.data_dir, 'bait.json'))
+            self.friend_link_persistence = FriendLinkPersistence(os.path.join(self.data_dir, 'friend_links.json'))
+            self.background_persistence = BackgroundPersistence(os.path.join(self.data_dir, 'background.json'))
+            self.credentials_persistence = CredentialsPersistence(os.path.join(self.data_dir, 'credentials.json'))
+
+            # Create automatic backup on startup
+            self.backup_dir = os.path.join(self.data_dir, 'backups')
+            os.makedirs(self.backup_dir, exist_ok=True)
+            # Keep last 10 backups automatically
+            backups = list_backups(self.backup_dir)
+            if len(backups) >= 10:
+                # Remove oldest backups beyond 10
+                for old_backup in backups[10:]:
+                    old_path = os.path.join(self.backup_dir, old_backup)
+                    shutil.rmtree(old_path, ignore_errors=True)
+            # Create new backup
+            create_auto_backup(self.data_dir, self.backup_dir)
+
+            # Load background config
+            self.loading_label.after(0, lambda: self.loading_label.configure(text="正在加载背景..."))
+            self.background_config = self.background_persistence.load_config()
+
+            # All loading done - switch to main UI on main thread
+            self.app.after(0, self._finish_loading)
+
+        # Start background thread
+        thread = threading.Thread(target=background_task, daemon=True)
+        thread.start()
+
+    def _finish_loading(self):
+        """Called after background loading completes - switch to main UI"""
+        # Stop loading animation
+        if self.loading_animation_id:
+            self.app.after_cancel(self.loading_animation_id)
+
+        # Remove loading screen
+        self.loading_frame.destroy()
+
+        # Create main UI
         self.create_background_canvas()
-
-        # Create main content frame on top of background
         self.create_main_content()
-
-        # Load saved data
         self.load_background()
-
-        # Show home page by default
         self.show_home_page()
 
         # Update background again after window is fully rendered
@@ -386,12 +486,14 @@ class MainWindow:
         self.update_background()
 
     def update_background(self):
-        """Update the background image on canvas"""
+        """Update the background image on canvas - TURNED OFF for performance"""
+        # Temporarily disabled - no background image to avoid resize redraws
+        # If you want to re-enable, comment out the return below
+        return
+
         if self.background_config and self.background_config.image_path:
             if os.path.exists(self.background_config.image_path):
                 try:
-                    # Open and resize image to fit canvas
-                    image = Image.open(self.background_config.image_path)
                     canvas_width = self.bg_canvas.winfo_width()
                     canvas_height = self.bg_canvas.winfo_height()
                     # If canvas not yet sized (during startup), use current window size
@@ -399,27 +501,68 @@ class MainWindow:
                         canvas_width = self.app.winfo_width()
                     if canvas_height <= 1:
                         canvas_height = self.app.winfo_height()
-                    if canvas_width > 1 and canvas_height > 1:
-                        image = image.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
-                        # Apply opacity
-                        if image.mode != 'RGBA':
-                            image = image.convert('RGBA')
-                        # Create alpha channel with the desired opacity (efficient method)
+                    # If still not sized, schedule a retry - don't give up permanently
+                    if canvas_width <= 1 or canvas_height <= 1:
+                        self.app.after(100, self.update_background)
+                        return
+
+                    # Check if we need to rebuild the alpha cached original
+                    # Rebuild if:
+                    # 1. No cache doesn't exist
+                    # 2. Image path changed
+                    # 3. Opacity changed
+                    needs_rebuild_alpha = (
+                        self.background_original_alpha is None or
+                        getattr(self, '_last_bg_path', None) != self.background_config.image_path or
+                        getattr(self, '_last_opacity', None) != self.background_config.opacity
+                    )
+
+                    if needs_rebuild_alpha:
+                        self._last_bg_path = self.background_config.image_path
+                        self._last_opacity = self.background_config.opacity
+                        # Load original image
+                        self.background_original_image = Image.open(self.background_config.image_path)
+                        # Pre-process with opacity once
+                        original = self.background_original_image
+                        if original.mode != 'RGBA':
+                            original = original.convert('RGBA')
+                        # Apply opacity to the original image
                         alpha = int(self.background_config.opacity * 255)
-                        alpha_channel = Image.new('L', image.size, alpha)
-                        image.putalpha(alpha_channel)
+                        alpha_channel = Image.new('L', original.size, alpha)
+                        original.putalpha(alpha_channel)
+                        self.background_original_alpha = original
+                        # Force resize cache is invalid now
+                        self.last_cached_size = (0, 0)
+
+                    # Only re-resize if size changed significantly (> 20px)
+                    # This avoids re-rendering for tiny resize adjustments
+                    last_w, last_h = self.last_cached_size
+                    size_changed_enough = (
+                        abs(canvas_width - last_w) > 20 or
+                        abs(canvas_height - last_h) > 20
+                    )
+
+                    if size_changed_enough or self.background_photo is None:
+                        # Resize from pre-processed original with alpha
+                        image = self.background_original_alpha.resize(
+                            (canvas_width, canvas_height),
+                            Image.Resampling.LANCZOS
+                        )
                         # We need to keep a reference
                         self.background_image = image
                         self.background_photo = ImageTk.PhotoImage(image)
-                        self.bg_canvas.delete("background")
-                        self.bg_canvas.create_image(
-                            0, 0,
-                            image=self.background_photo,
-                            anchor="nw",
-                            tags=("background",)
-                        )
-                        # Set opacity by changing canvas alpha - need to redraw cats on top
-                        self.bg_canvas.tag_lower("background")
+                        self.last_cached_size = (canvas_width, canvas_height)
+
+                    # Update canvas
+                    self.bg_canvas.delete("background")
+                    self.bg_canvas.create_image(
+                        0, 0,
+                        image=self.background_photo,
+                        anchor="nw",
+                        tags=("background",)
+                    )
+                    # Set opacity by changing canvas alpha - need to redraw cats on top
+                    self.bg_canvas.tag_lower("background")
                 except Exception as e:
                     messagebox.showerror("错误", f"加载背景图片失败: {str(e)}")
 
@@ -428,9 +571,12 @@ class MainWindow:
         self.cat_follower.update_position(event.x, event.y)
 
     def on_canvas_resize(self, event):
-        """Handle canvas resize"""
+        """Handle canvas resize with debouncing for performance"""
         self.cat_follower.on_resize(event)
-        self.update_background()
+        # Debounce: only update background after resize stops for 200ms
+        if self._resize_after_id is not None:
+            self.app.after_cancel(self._resize_after_id)
+        self._resize_after_id = self.app.after(200, self.update_background)
 
     def open_background_dialog(self):
         """Open dialog to change background image"""
@@ -445,6 +591,12 @@ class MainWindow:
         """Callback when background config is changed"""
         self.background_config = new_config
         self.background_persistence.save_config(new_config)
+        # Invalidate all caches when background changes
+        self.background_original_image = None
+        self.background_original_alpha = None
+        self.last_cached_size = (0, 0)
+        self._last_bg_path = None
+        self._last_opacity = None
         self.update_background()
 
     def open_friend_links(self):

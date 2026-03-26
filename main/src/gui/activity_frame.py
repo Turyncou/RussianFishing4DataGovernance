@@ -1,6 +1,6 @@
 """Activity statistics frame (grinding + star waiting)"""
 import customtkinter as ctk
-from tkinter import ttk, Listbox
+from tkinter import ttk, Listbox, messagebox
 from datetime import date
 from typing import List, Optional
 import json
@@ -682,14 +682,25 @@ class SetGoalDialog(ctk.CTkToplevel):
 
     def confirm(self):
         try:
-            target_value = int(self.value_entry.get() or "0")
-            target_duration = int(self.duration_entry.get() or "0")
-            total_income = int(self.income_entry.get() or "0")
-            self.callback(self.activity_type, target_value, target_duration, total_income)
-            # Delay release/destroy to let Tkinter process events properly
-            self.after(10, lambda: [self.grab_release(), self.destroy()])
+            target_value = int((self.value_entry.get() or "0").strip())
+            target_duration = int((self.duration_entry.get() or "0").strip())
+            total_income = int((self.income_entry.get() or "0").strip())
+            if target_value >= 0 and target_duration >= 0 and total_income >= 0:
+                self.callback(self.activity_type, target_value, target_duration, total_income)
+                # Delay release/destroy to let Tkinter process events properly
+                self.after(10, lambda: self._cleanup())
+            else:
+                # Invalid values - show message
+                messagebox.showwarning("输入错误", "数值不能为负数，请重新输入")
         except ValueError:
-            pass
+            # Invalid input - show message
+            from tkinter import messagebox
+            messagebox.showwarning("输入错误", "请输入有效的数字")
+
+    def _cleanup(self):
+        """Clean up and close dialog"""
+        self.grab_release()
+        self.destroy()
 
     def clear(self):
         self.callback(self.activity_type, 0, 0, 0)
@@ -754,14 +765,24 @@ class AddRecordDialog(ctk.CTkToplevel):
 
     def confirm(self):
         try:
-            value = int(self.value_entry.get())
-            duration = int(self.duration_entry.get())
+            value = int(self.value_entry.get().strip())
+            duration = int(self.duration_entry.get().strip())
             if value >= 0 and duration >= 0:
                 self.callback(self.activity_type, value, duration)
                 # Delay release/destroy to let Tkinter process events properly
-                self.after(10, lambda: [self.grab_release(), self.destroy()])
+                self.after(10, lambda: self._cleanup())
+            else:
+                # Invalid values - show message
+                messagebox.showwarning("输入错误", "数值不能为负数，请重新输入")
         except ValueError:
-            pass
+            # Invalid input - show message
+            from tkinter import messagebox
+            messagebox.showwarning("输入错误", "请输入有效的数字")
+
+    def _cleanup(self):
+        """Clean up and close dialog"""
+        self.grab_release()
+        self.destroy()
 
 
 class SuggestionSettingsDialog(ctk.CTkToplevel):
@@ -825,19 +846,29 @@ class SuggestionSettingsDialog(ctk.CTkToplevel):
 
     def save(self):
         try:
-            daily = float(self.daily_total_entry.get())
-            grinding = int(self.grinding_concurrent_entry.get())
-            star = int(self.star_concurrent_entry.get())
-            switch = int(self.switch_entry.get())
-            new_settings = SuggestionUserSettings(
-                daily_total_hours=daily,
-                grinding_concurrent=grinding,
-                star_waiting_concurrent=star,
-                switch_minutes=switch
-            )
-            self.callback(new_settings)
-            # Delay release/destroy to let Tkinter process events properly
-            self.after(10, lambda: [self.grab_release(), self.destroy()])
+            daily = float(self.daily_total_entry.get().strip())
+            grinding = int(self.grinding_concurrent_entry.get().strip())
+            star = int(self.star_concurrent_entry.get().strip())
+            switch = int(self.switch_entry.get().strip())
+            if daily > 0 and grinding > 0 and star > 0 and switch >= 0:
+                new_settings = SuggestionUserSettings(
+                    daily_total_hours=daily,
+                    grinding_concurrent=grinding,
+                    star_waiting_concurrent=star,
+                    switch_minutes=switch
+                )
+                self.callback(new_settings)
+                # Delay release/destroy to let Tkinter process events properly
+                self.after(10, lambda: self._cleanup())
+            else:
+                # Invalid values - show message
+                messagebox.showwarning("输入错误", "数值必须大于0，请重新输入")
         except ValueError:
-            # Invalid input - let user correct it, do not close dialog
-            pass
+            # Invalid input - show message
+            from tkinter import messagebox
+            messagebox.showwarning("输入错误", "请输入有效的数字")
+
+    def _cleanup(self):
+        """Clean up and close dialog"""
+        self.grab_release()
+        self.destroy()
