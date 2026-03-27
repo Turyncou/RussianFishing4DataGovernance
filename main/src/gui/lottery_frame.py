@@ -245,7 +245,7 @@ class PrizeSettingsDialog(ctk.CTkToplevel):
         self.prizes = current_prizes.copy()
 
         self.title("奖项设置")
-        self.geometry("500x400")
+        self.geometry("500x480")
         self.resizable(False, False)
 
         self.grab_set()
@@ -278,22 +278,16 @@ class PrizeSettingsDialog(ctk.CTkToplevel):
         self.scroll_frame = ctk.CTkScrollableFrame(list_frame, height=220)
         self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        self.prize_rows = []
-        for i, prize in enumerate(self.prizes):
-            self._add_prize_row(i, prize)
-
-        # Add button
-        add_btn = ctk.CTkButton(
-            list_frame,
-            text="+ 添加奖项",
-            command=self.add_prize,
-            width=120
-        )
-        add_btn.pack(pady=10)
-
-        # Bottom buttons
+        # Bottom buttons - create total_label first before adding rows
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.pack(fill="x", padx=20, pady=10)
+
+        total_probability = sum(p.probability for p in self.prizes)
+        self.total_label = ctk.CTkLabel(
+            btn_frame,
+            text=f"总概率: {total_probability:.1f}%"
+        )
+        self.total_label.pack(side="left")
 
         save_btn = ctk.CTkButton(
             btn_frame,
@@ -313,12 +307,19 @@ class PrizeSettingsDialog(ctk.CTkToplevel):
         )
         cancel_btn.pack(side="right", padx=5)
 
-        total_probability = sum(p.probability for p in self.prizes)
-        self.total_label = ctk.CTkLabel(
-            btn_frame,
-            text=f"总概率: {total_probability:.1f}%"
+        # Now add prize rows after total_label is created
+        self.prize_rows = []
+        for i, prize in enumerate(self.prizes):
+            self._add_prize_row(i, prize)
+
+        # Add button
+        add_btn = ctk.CTkButton(
+            list_frame,
+            text="+ 添加奖项",
+            command=self.add_prize,
+            width=120
         )
-        self.total_label.pack(side="left")
+        add_btn.pack(pady=10)
 
     def _add_prize_row(self, index, prize: LotteryPrize):
         """Add a row to the prize list"""
@@ -340,7 +341,7 @@ class PrizeSettingsDialog(ctk.CTkToplevel):
         delete_btn = ctk.CTkButton(
             row_frame,
             text="删除",
-            command=lambda: self.delete_prize(row_frame, index),
+            command=lambda idx=index: self.delete_prize(row_frame, idx),
             width=60,
             fg_color="#cc3333",
             hover_color="#aa2222"
