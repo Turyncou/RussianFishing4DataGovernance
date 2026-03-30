@@ -14,7 +14,7 @@ class FriendLinksDialog(ctk.CTkToplevel):
         self.links = current_links.copy()
 
         self.title("友情链接")
-        self.geometry("500x400")
+        self.geometry("500x450")
         self.resizable(False, False)
         self.grab_set()
 
@@ -136,7 +136,7 @@ class AddLinkDialog(ctk.CTkToplevel):
         self.callback = callback
 
         self.title("添加友情链接")
-        self.geometry("400x200")
+        self.geometry("400x230")
         self.resizable(False, False)
         self.grab_set()
 

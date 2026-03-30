@@ -227,7 +227,8 @@ class MainWindow:
         self.title_label.pack(side="left", padx=20, pady=15)
 
         # Content area - scrollable for any content size
-        self.content_container = ctk.CTkScrollableFrame(self.main_container, corner_radius=8, fg_color="#1e1e1e")
+        # Use transparent to show background image through
+        self.content_container = ctk.CTkScrollableFrame(self.main_container, corner_radius=8, fg_color="transparent")
         self.content_container.pack(fill="both", expand=True, padx=15, pady=8)
 
         # Bottom buttons bar (background and friend links)
@@ -273,8 +274,8 @@ class MainWindow:
         if self.back_button.winfo_ismapped():
             self.back_button.pack_forget()
 
-        # Home page container
-        home_frame = ctk.CTkFrame(self.content_container, fg_color="#252525", corner_radius=16)
+        # Home page container - transparent to show background
+        home_frame = ctk.CTkFrame(self.content_container, fg_color="transparent", corner_radius=16)
         home_frame.pack(fill="both", expand=True, padx=0, pady=0)
 
         # Welcome label
@@ -486,11 +487,7 @@ class MainWindow:
         self.update_background()
 
     def update_background(self):
-        """Update the background image on canvas - TURNED OFF for performance"""
-        # Temporarily disabled - no background image to avoid resize redraws
-        # If you want to re-enable, comment out the return below
-        return
-
+        """Update the background image on canvas"""
         if self.background_config and self.background_config.image_path:
             if os.path.exists(self.background_config.image_path):
                 try:
