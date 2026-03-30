@@ -360,6 +360,7 @@ class AddBaitDialog(ctk.CTkToplevel):
                 initial_stock = 0
         except ValueError:
             CTkMessagebox(title="输入错误", message="请输入有效的库存数量", icon="warning", option_1="确定")
+            self.after(200, lambda: self.grab_set())
             return
 
         if name:
@@ -368,3 +369,4 @@ class AddBaitDialog(ctk.CTkToplevel):
             self.destroy()
         else:
             CTkMessagebox(title="输入错误", message="饵料/钓具名称不能为空", icon="warning", option_1="确定")
+            self.after(200, lambda: self.grab_set())

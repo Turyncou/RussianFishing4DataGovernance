@@ -285,12 +285,14 @@ class AddStorageCharacterDialog(ctk.CTkToplevel):
         name = self.name_entry.get().strip()
         if not name:
             CTkMessagebox(title="输入错误", message="角色名称不能为空", icon="warning", option_1="确定")
+            self.after(200, lambda: self.grab_set())
             return
         try:
             minutes = int(self.minutes_entry.get().strip())
             # Will be clamped to >=0 by model
         except ValueError:
             CTkMessagebox(title="输入错误", message="请输入有效的分钟数", icon="warning", option_1="确定")
+            self.after(200, lambda: self.grab_set())
             return
 
         self.callback(name, minutes)

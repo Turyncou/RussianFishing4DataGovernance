@@ -329,9 +329,11 @@ class ActivityFrame(ctk.CTkFrame):
 
     def on_character_select(self, event):
         """Handle character selection"""
+        # Ignore selection clear events that happen when dialog opens
+        # This prevents current_character from becoming None when opening add record dialog
         selection = self.character_listbox.curselection()
         if not selection:
-            self.current_character = None
+            # Don't clear current_character on selection clear - this fixes the bug
             return
         index = selection[0]
         self.current_character = self.characters[index]
@@ -518,31 +520,48 @@ class ActivityFrame(ctk.CTkFrame):
 
     def add_record(self, activity_type: ActivityType):
         """Add a new record for today"""
-        if not self.current_character:
+        # Re-check selection before opening dialog - selection can get lost when dialog grabs focus
+        selection = self.character_listbox.curselection()
+        if not selection and self.current_character is None:
+            CTkMessagebox(title="提示", message="请先在左侧选择一个角色", icon="warning", option_1="确定")
             return
         dialog = AddRecordDialog(self.winfo_toplevel(), activity_type, self.on_add_record_done)
 
     def on_add_record_done(self, activity_type: ActivityType, value, duration_minutes):
         """Callback after adding record"""
-        if not self.current_character:
-            return
-        if activity_type == ActivityType.GRINDING:
-            record = ActivityRecord(
-                date=date.today(),
-                activity_type=activity_type,
-                silver_count=value,
-                duration_minutes=duration_minutes
-            )
-        else:
-            record = ActivityRecord(
-                date=date.today(),
-                activity_type=activity_type,
-                success_count=value,
-                duration_minutes=duration_minutes
-            )
-        self.current_character.add_record(record)
-        self.update_display(activity_type)
-        self.save_data()
+        try:
+            # If current_character is None, try to get it from selection again
+            # This fixes the bug where opening dialog causes selection to be lost
+            char = self.current_character
+            if char is None:
+                selection = self.character_listbox.curselection()
+                if selection:
+                    index = selection[0]
+                    if 0 <= index < len(self.characters):
+                        char = self.characters[index]
+                        self.current_character = char
+            if not char:
+                CTkMessagebox(title="提示", message="请先在左侧选择一个角色", icon="warning", option_1="确定")
+                return
+            if activity_type == ActivityType.GRINDING:
+                record = ActivityRecord(
+                    date=date.today(),
+                    activity_type=activity_type,
+                    silver_count=value,
+                    duration_minutes=duration_minutes
+                )
+            else:
+                record = ActivityRecord(
+                    date=date.today(),
+                    activity_type=activity_type,
+                    success_count=value,
+                    duration_minutes=duration_minutes
+                )
+            char.add_record(record)
+            self.update_display(activity_type)
+            self.save_data()
+        except Exception as e:
+            CTkMessagebox(title="添加记录失败", message=f"错误: {str(e)}", icon="warning", option_1="确定")
 
     def open_suggestion_settings(self):
         """Open global suggestion settings dialog"""
@@ -732,18 +751,42 @@ class SetGoalDialog(ctk.CTkToplevel):
 
     def confirm(self):
         try:
-            target_value = int((self.value_entry.get() or "0").strip())
-            target_duration = int((self.duration_entry.get() or "0").strip())
-            total_income = int((self.income_entry.get() or "0").strip())
+            # Extract only digits from input, ignore any non-digit characters (commas, spaces, units, etc.)
+            # Supports both half-width (ASCII) and full-width (Chinese input) digits
+            # Never fails, always returns an integer >= 0
+            def _parse_int(text):
+                try:
+                    if not text:
+                        return 0
+                    result_digits = []
+                    for c in str(text):
+                        code = ord(c)
+                        # ASCII half-width digits 0-9: codes 48-57
+                        if 48 <= code <= 57:
+                            result_digits.append(c)
+                        # Full-width digits ０-９: codes 0xFF10-0xFF19
+                        elif 0xFF10 <= code <= 0xFF19:
+                            ascii_code = code - 0xFF10 + 48
+                            result_digits.append(chr(ascii_code))
+                    if not result_digits:
+                        return 0
+                    return max(0, int(''.join(result_digits)))
+                except Exception:
+                    return 0
+
+            target_value = _parse_int(self.value_entry.get())
+            target_duration = _parse_int(self.duration_entry.get())
+            total_income = _parse_int(self.income_entry.get())
+
             if target_value >= 0 and target_duration >= 0 and total_income >= 0:
                 self.callback(self.activity_type, target_value, target_duration, total_income)
                 # Delay release/destroy to let Tkinter process events properly
                 self.after(10, lambda: self._cleanup())
             else:
-                # Invalid values - show message
+                # Invalid values - show message, focus returns automatically after CTkMessagebox closes
                 CTkMessagebox(title="输入错误", message="数值不能为负数，请重新输入", icon="warning", option_1="确定")
         except ValueError:
-            # Invalid input - show message
+            # Invalid input - show message, focus returns automatically after CTkMessagebox closes
             CTkMessagebox(title="输入错误", message="请输入有效的数字", icon="warning", option_1="确定")
 
     def _cleanup(self):
@@ -812,20 +855,80 @@ class AddRecordDialog(ctk.CTkToplevel):
         # Delay release/destroy to let Tkinter process events properly
         self.after(10, lambda: [self.grab_release(), self.destroy()])
 
-    def confirm(self):
+    def _clean_digits(self, text):
+        """Extract only digits from input text - simplest possible implementation
+        Map every possible digit character to its value using Unicode codes
+        Never fails, always returns an integer >= 0
+        """
         try:
-            value = int(self.value_entry.get().strip())
-            duration = int(self.duration_entry.get().strip())
-            if value >= 0 and duration >= 0:
+            if not text:
+                return 0
+            text_str = str(text)
+            result_digits = []
+            chars_found = []
+            for c in text_str:
+                code = ord(c)
+                chars_found.append(f"'{c}'(0x{code:04X})")
+                # ASCII half-width digits 0-9: codes 48-57
+                if 48 <= code <= 57:
+                    result_digits.append(c)
+                # Full-width digits ０-９: codes 0xFF10-0xFF19
+                elif 0xFF10 <= code <= 0xFF19:
+                    # Convert to ASCII digit
+                    ascii_code = code - 0xFF10 + 48
+                    result_digits.append(chr(ascii_code))
+            if not result_digits:
+                # Debug: show what we got
+                from CTkMessagebox import CTkMessagebox
+                CTkMessagebox(title="Debug: 没有提取到数字",
+                             message=f"输入内容: '{text_str}'\n所有字符: {', '.join(chars_found)}\n提取结果为空，返回0",
+                             icon="info", option_1="确定")
+                return 0
+            result = int(''.join(result_digits))
+            return max(0, result)
+        except Exception as e:
+            from CTkMessagebox import CTkMessagebox
+            CTkMessagebox(title="Debug: 提取出错", message=f"错误: {str(e)}", icon="warning", option_1="确定")
+            return 0
+
+    def confirm(self):
+        # Ultimate defense - guarantee dialog closes NO MATTER WHAT
+        try:
+            value = 0
+            duration = 0
+            error_msg = None
+
+            try:
+                value_text = self.value_entry.get()
+                duration_text = self.duration_entry.get()
+                value = self._clean_digits(value_text)
+                duration = self._clean_digits(duration_text)
+                value = max(0, value)
+                duration = max(0, duration)
+
+                # Debug - show what we got
+                CTkMessagebox(title="Debug: 提取结果",
+                             message=f"银币/数量输入: '{value_text}' → 提取: {value}\n时长输入: '{duration_text}' → 提取: {duration}",
+                             icon="info", option_1="继续")
+
+                value = max(0, value)
+                duration = max(0, duration)
                 self.callback(self.activity_type, value, duration)
-                # Delay release/destroy to let Tkinter process events properly
-                self.after(10, lambda: self._cleanup())
-            else:
-                # Invalid values - show message
-                CTkMessagebox(title="输入错误", message="数值不能为负数，请重新输入", icon="warning", option_1="确定")
-        except ValueError:
-            # Invalid input - show message
-            CTkMessagebox(title="输入错误", message="请输入有效的数字", icon="warning", option_1="确定")
+            except Exception as e:
+                error_msg = str(e)
+
+            try:
+                if error_msg:
+                    CTkMessagebox(title="添加记录失败", message=error_msg, icon="warning", option_1="确定")
+            finally:
+                # Always close
+                self.after(10, self._cleanup)
+        except:
+            # Absolutely anything goes wrong - still try to close
+            try:
+                self.after(10, self._cleanup)
+            except:
+                pass
 
     def _cleanup(self):
         """Clean up and close dialog"""
@@ -909,11 +1012,18 @@ class SuggestionSettingsDialog(ctk.CTkToplevel):
                 # Delay release/destroy to let Tkinter process events properly
                 self.after(10, lambda: self._cleanup())
             else:
-                # Invalid values - show message
+                # Invalid values - show message, then regain focus
+                def _regain():
+                    self.grab_set()
                 CTkMessagebox(title="输入错误", message="数值必须大于0，请重新输入", icon="warning", option_1="确定")
+                self.after(250, _regain)
         except ValueError:
-            # Invalid input - show message
+            # Invalid input - show message, then regain focus
+            def _regain():
+                self.grab_set()
             CTkMessagebox(title="输入错误", message="请输入有效的数字", icon="warning", option_1="确定")
+            self.after(250, _regain)
+            self.after(250, _regain)
 
     def _cleanup(self):
         """Clean up and close dialog"""

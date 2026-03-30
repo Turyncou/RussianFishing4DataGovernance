@@ -18,6 +18,7 @@ from .activity_frame import ActivityFrame
 from .storage_frame import StorageFrame
 from .credentials_frame import CredentialsFrame
 from .bait_frame import BaitFrame
+from .statistics_frame import StatisticsFrame
 from .backup_dialog import BackupRestoreDialog
 from .friend_links_dialog import FriendLinksDialog
 
@@ -409,6 +410,19 @@ class MainWindow:
         )
         credentials_btn.grid(row=2, column=0, padx=20, pady=15)
 
+        statistics_btn = ctk.CTkButton(
+            btn_container,
+            text="📈 数据分析",
+            command=self.show_statistics,
+            width=btn_size,
+            height=btn_height,
+            font=btn_font,
+            corner_radius=12,
+            fg_color="#2c5aa0",
+            hover_color="#1a3d66"
+        )
+        statistics_btn.grid(row=2, column=1, padx=20, pady=15)
+
         self.current_frame = home_frame
         # Update scrollable region after adding content
         self.content_container.update()
@@ -550,6 +564,33 @@ class MainWindow:
             bait_frame.pack(fill="both", expand=True)
             self._frame_cache[cache_key] = (frame, bait_frame)
         self.bait_frame = bait_frame
+        self.current_frame = frame
+
+        # Update scrollable region after adding content
+        self.content_container.update()
+
+    def show_statistics(self):
+        """Show data analysis page with visualizations"""
+        # Show back button
+        self.back_button.pack(side="left", padx=(10, 0), pady=10)
+        self.clear_current_content()
+
+        # Use cached frame if already created
+        cache_key = "statistics"
+        if cache_key in self._frame_cache:
+            frame, statistics_frame = self._frame_cache[cache_key]
+            frame.pack(fill="both", expand=True)
+            statistics_frame.refresh_plots()  # Refresh data
+        else:
+            frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+            frame.pack(fill="both", expand=True)
+            statistics_frame = StatisticsFrame(
+                frame,
+                self.activity_persistence
+            )
+            statistics_frame.pack(fill="both", expand=True)
+            self._frame_cache[cache_key] = (frame, statistics_frame)
+        self.statistics_frame = statistics_frame
         self.current_frame = frame
 
         # Update scrollable region after adding content
