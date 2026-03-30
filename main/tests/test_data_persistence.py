@@ -6,15 +6,14 @@ import tempfile
 from datetime import date
 from core.models import (
     LotteryPrize, ActivityRecord, ActivityCharacter, StorageCharacter,
-    FriendLink, BackgroundConfig, ActivityGoal, ActivityType
+    FriendLink, ActivityGoal, ActivityType
 )
 from data.persistence import (
     DataPersistence,
     LotteryPersistence,
     ActivityPersistence,
     StoragePersistence,
-    FriendLinkPersistence,
-    BackgroundPersistence
+    FriendLinkPersistence
 )
 
 
@@ -205,28 +204,3 @@ class TestFriendLinkPersistence:
             assert loaded[0].text == "百度"
             assert loaded[0].url == "https://www.baidu.com"
             os.unlink(f.name)
-
-
-class TestBackgroundPersistence:
-    """Tests for BackgroundPersistence"""
-
-    def test_save_and_load_background_config(self):
-        """Test saving and loading background config"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
-            f.close()
-            bp = BackgroundPersistence(f.name)
-            config = BackgroundConfig("test_image.jpg", 0.7)
-            bp.save_config(config)
-            loaded = bp.load_config()
-            assert loaded.image_path == "test_image.jpg"
-            assert loaded.opacity == 0.7
-            os.unlink(f.name)
-
-    def test_load_default_background_config(self):
-        """Test loading default config when no file exists"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
-            f.close()
-            os.unlink(f.name)
-            bp = BackgroundPersistence(f.name)
-            loaded = bp.load_config()
-            assert isinstance(loaded, BackgroundConfig)

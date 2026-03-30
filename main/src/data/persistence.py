@@ -8,7 +8,7 @@ from typing import Any, List
 from cryptography.fernet import Fernet
 from core.models import (
     LotteryPrize, ActivityRecord, ActivityCharacter, ActivityGoal, ActivityType,
-    StorageCharacter, FriendLink, BackgroundConfig, SuggestionUserSettings,
+    StorageCharacter, FriendLink, SuggestionUserSettings,
     AccountCredential, BaitConsumption
 )
 
@@ -292,35 +292,6 @@ class FriendLinkPersistence(DataPersistence):
             return links
         except (KeyError, ValueError):
             return []
-
-
-class BackgroundPersistence(DataPersistence):
-    """Persistence for background configuration"""
-
-    def __init__(self, file_path: str):
-        super().__init__(file_path)
-
-    def save_config(self, config: BackgroundConfig) -> None:
-        """Save background configuration to file"""
-        data = {
-            'image_path': config.image_path,
-            'opacity': config.opacity
-        }
-        self.save(data)
-
-    def load_config(self) -> BackgroundConfig:
-        """Load background configuration from file"""
-        data = self.load()
-        if not data:
-            return BackgroundConfig()
-
-        try:
-            return BackgroundConfig(
-                image_path=data.get('image_path'),
-                opacity=data.get('opacity', 1.0)
-            )
-        except (KeyError, ValueError):
-            return BackgroundConfig()
 
 
 class CredentialsPersistence(DataPersistence):

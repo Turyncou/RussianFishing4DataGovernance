@@ -1,6 +1,7 @@
 """Storage duration tracking frame"""
 import customtkinter as ctk
-from tkinter import ttk, messagebox
+from tkinter import ttk
+from CTkMessagebox import CTkMessagebox
 from typing import List
 
 from core.models import StorageCharacter
@@ -14,6 +15,9 @@ class StorageFrame(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent", corner_radius=16)
         self.persistence = persistence
         self.characters: List[StorageCharacter] = []
+        # Sorting state
+        self._sort_column = "角色名称"
+        self._sort_ascending = True
 
         self.create_widgets()
         self.load_data()
@@ -67,8 +71,12 @@ class StorageFrame(ctk.CTkFrame):
 
         columns = ("角色名称", "剩余时长(分钟)", "操作")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=15)
+        # Bind click on heading for sorting
         for col in columns:
-            self.tree.heading(col, text=col)
+            if col != "操作":  # Don't sort on operation column
+                self.tree.heading(col, text=col, command=lambda c=col: self._sort_by_column(c))
+            else:
+                self.tree.heading(col, text=col)
             if col == "角色名称":
                 self.tree.column(col, width=200, anchor="center")
             elif col == "剩余时长(分钟)":
@@ -78,8 +86,13 @@ class StorageFrame(ctk.CTkFrame):
 
         self.tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-        style = ttk.Style()
-        style.configure("Treeview", background="#333333", foreground="white", fieldbackground="#333333")
+        # Configure dark theme style for Treeview - only need to do this once globally
+        if not hasattr(self.__class__, '_tree_style_configured'):
+            style = ttk.Style()
+            style.configure("Treeview", background="#333333", foreground="white", fieldbackground="#333333")
+            # Also configure heading for better dark theme appearance
+            style.configure("Treeview.Heading", background="#444444", foreground="white")
+            setattr(self.__class__, '_tree_style_configured', True)
 
         # Control area for adding/removing minutes
         control_frame = ctk.CTkFrame(self, fg_color="#252525", corner_radius=12)
@@ -148,6 +161,27 @@ class StorageFrame(ctk.CTkFrame):
             return self.characters[index]
         return None
 
+    def _sort_by_column(self, column: str):
+        """Sort the storage character list by the clicked column"""
+        # Toggle sort order if clicking the same column again
+        if column == self._sort_column:
+            self._sort_ascending = not self._sort_ascending
+        else:
+            self._sort_column = column
+            self._sort_ascending = True
+
+        # Get key extractor based on column
+        if column == "角色名称":
+            key_func = lambda c: c.name.lower()
+        elif column == "剩余时长(分钟)":
+            key_func = lambda c: c.remaining_minutes
+        else:
+            key_func = lambda c: c.name.lower()
+
+        # Sort
+        self.characters.sort(key=key_func, reverse=not self._sort_ascending)
+        self.update_table()
+
     def add_character(self):
         """Add a new character"""
         dialog = AddStorageCharacterDialog(self.winfo_toplevel(), self.on_add_character_done)
@@ -173,37 +207,35 @@ class StorageFrame(ctk.CTkFrame):
         """Add minutes to selected character"""
         char = self.get_selected_character()
         if not char:
-            messagebox.showwarning("提示", "请先选择一个角色")
+            CTkMessagebox(title="提示", message="请先选择一个角色", icon="warning", option_1="确定")
             return
         try:
             minutes = int(self.minutes_entry.get().strip())
             if minutes <= 0:
-                from tkinter import messagebox
-                messagebox.showwarning("输入错误", "分钟数必须大于0")
+                CTkMessagebox(title="输入错误", message="分钟数必须大于0", icon="warning", option_1="确定")
                 return
             char.add_minutes(minutes)
             self.update_table()
             self.save_data()
         except ValueError:
-            messagebox.showwarning("输入错误", "请输入有效的分钟数")
+            CTkMessagebox(title="输入错误", message="请输入有效的分钟数", icon="warning", option_1="确定")
 
     def remove_minutes(self):
         """Remove minutes from selected character"""
         char = self.get_selected_character()
         if not char:
-            messagebox.showwarning("提示", "请先选择一个角色")
+            CTkMessagebox(title="提示", message="请先选择一个角色", icon="warning", option_1="确定")
             return
         try:
             minutes = int(self.minutes_entry.get().strip())
             if minutes <= 0:
-                from tkinter import messagebox
-                messagebox.showwarning("输入错误", "分钟数必须大于0")
+                CTkMessagebox(title="输入错误", message="分钟数必须大于0", icon="warning", option_1="确定")
                 return
             char.remove_minutes(minutes)
             self.update_table()
             self.save_data()
         except ValueError:
-            messagebox.showwarning("输入错误", "请输入有效的分钟数")
+            CTkMessagebox(title="输入错误", message="请输入有效的分钟数", icon="warning", option_1="确定")
 
     def save_data(self):
         """Save all data to persistence"""
@@ -252,13 +284,13 @@ class AddStorageCharacterDialog(ctk.CTkToplevel):
     def confirm(self):
         name = self.name_entry.get().strip()
         if not name:
-            messagebox.showwarning("输入错误", "角色名称不能为空")
+            CTkMessagebox(title="输入错误", message="角色名称不能为空", icon="warning", option_1="确定")
             return
         try:
             minutes = int(self.minutes_entry.get().strip())
             # Will be clamped to >=0 by model
         except ValueError:
-            messagebox.showwarning("输入错误", "请输入有效的分钟数")
+            CTkMessagebox(title="输入错误", message="请输入有效的分钟数", icon="warning", option_1="确定")
             return
 
         self.callback(name, minutes)

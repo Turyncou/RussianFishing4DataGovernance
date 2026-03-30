@@ -191,16 +191,6 @@ class FriendLink:
 
 
 @dataclass
-class BackgroundConfig:
-    """Configuration for background image"""
-    image_path: Optional[str] = None
-    opacity: float = 1.0
-
-    def __post_init__(self):
-        self.opacity = max(0.0, min(1.0, self.opacity))
-
-
-@dataclass
 class AccountCredential:
     """Represents a stored account credential (username/password)"""
     account_name: str    # Account display name/username

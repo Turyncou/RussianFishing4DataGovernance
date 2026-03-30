@@ -1,7 +1,8 @@
 """Friend links dialog"""
 import customtkinter as ctk
 import webbrowser
-from tkinter import messagebox, Listbox
+from tkinter import Listbox
+from CTkMessagebox import CTkMessagebox
 from core.models import FriendLink
 
 
@@ -111,7 +112,7 @@ class FriendLinksDialog(ctk.CTkToplevel):
             self.links.append(new_link)
             self.update_list()
         except ValueError as e:
-            messagebox.showerror("错误", str(e))
+            CTkMessagebox(title="错误", message=str(e), icon="cancel", option_1="确定")
 
     def delete_selected(self):
         """Delete selected link"""
@@ -184,4 +185,4 @@ class AddLinkDialog(ctk.CTkToplevel):
             self.grab_release()
             self.destroy()
         else:
-            messagebox.showwarning("输入错误", "文字说明和链接地址都不能为空")
+            CTkMessagebox(title="输入错误", message="文字说明和链接地址都不能为空", icon="warning", option_1="确定")

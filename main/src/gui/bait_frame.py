@@ -1,6 +1,6 @@
 """Bait/Tackle consumption tracking frame - tracks bought/used/remaining"""
 import customtkinter as ctk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 from CTkMessagebox import CTkMessagebox
 from typing import List
 
@@ -16,6 +16,9 @@ class BaitFrame(ctk.CTkFrame):
         self.persistence = persistence
         self.baits: List[BaitConsumption] = []
         self.selected_bait: BaitConsumption | None = None
+        # Sorting state
+        self._sort_column = "名称"
+        self._sort_ascending = True
 
         self.create_widgets()
         self.load_data()
@@ -100,8 +103,9 @@ class BaitFrame(ctk.CTkFrame):
 
         columns = ("名称", "已购买", "已使用", "剩余")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=15)
+        # Bind click on heading for sorting
         for col in columns:
-            self.tree.heading(col, text=col)
+            self.tree.heading(col, text=col, command=lambda c=col: self._sort_by_column(c))
             if col == "名称":
                 self.tree.column(col, width=200, anchor="center")
             else:
@@ -110,8 +114,13 @@ class BaitFrame(ctk.CTkFrame):
         self.tree.pack(fill="both", expand=True, padx=10, pady=10)
         self.tree.bind("<<TreeviewSelect>>", self.on_bait_select)
 
-        style = ttk.Style()
-        style.configure("Treeview", background="#333333", foreground="white", fieldbackground="#333333")
+        # Configure dark theme style for Treeview - only need to do this once globally
+        if not hasattr(self.__class__, '_tree_style_configured'):
+            style = ttk.Style()
+            style.configure("Treeview", background="#333333", foreground="white", fieldbackground="#333333")
+            # Also configure heading for better dark theme appearance
+            style.configure("Treeview.Heading", background="#444444", foreground="white")
+            setattr(self.__class__, '_tree_style_configured', True)
 
         # Status / summary
         summary_frame = ctk.CTkFrame(self, fg_color="#252525", corner_radius=12)
@@ -165,6 +174,31 @@ class BaitFrame(ctk.CTkFrame):
         index = self.tree.index(selection[0])
         if 0 <= index < len(self.baits):
             self.selected_bait = self.baits[index]
+
+    def _sort_by_column(self, column: str):
+        """Sort the bait list by the clicked column"""
+        # Toggle sort order if clicking the same column again
+        if column == self._sort_column:
+            self._sort_ascending = not self._sort_ascending
+        else:
+            self._sort_column = column
+            self._sort_ascending = True
+
+        # Get key extractor based on column
+        if column == "名称":
+            key_func = lambda b: b.name.lower()
+        elif column == "已购买":
+            key_func = lambda b: b.total_bought
+        elif column == "已使用":
+            key_func = lambda b: b.total_used
+        elif column == "剩余":
+            key_func = lambda b: b.remaining
+        else:
+            key_func = lambda b: b.name.lower()
+
+        # Sort
+        self.baits.sort(key=key_func, reverse=not self._sort_ascending)
+        self.update_table()
 
     def add_bait(self):
         """Open dialog to add new bait"""
@@ -325,7 +359,7 @@ class AddBaitDialog(ctk.CTkToplevel):
             if initial_stock < 0:
                 initial_stock = 0
         except ValueError:
-            messagebox.showwarning("输入错误", "请输入有效的库存数量")
+            CTkMessagebox(title="输入错误", message="请输入有效的库存数量", icon="warning", option_1="确定")
             return
 
         if name:
@@ -333,4 +367,4 @@ class AddBaitDialog(ctk.CTkToplevel):
             self.grab_release()
             self.destroy()
         else:
-            messagebox.showwarning("输入错误", "饵料/钓具名称不能为空")
+            CTkMessagebox(title="输入错误", message="饵料/钓具名称不能为空", icon="warning", option_1="确定")

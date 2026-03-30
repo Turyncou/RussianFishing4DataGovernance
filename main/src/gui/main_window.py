@@ -4,24 +4,21 @@ import os
 import shutil
 import threading
 import customtkinter as ctk
-from PIL import Image, ImageTk
-from tkinter import Canvas, messagebox
+from CTkMessagebox import CTkMessagebox
 import webbrowser
 
 from data.persistence import (
     LotteryPersistence, ActivityPersistence, StoragePersistence, BaitPersistence,
-    FriendLinkPersistence, BackgroundPersistence, CredentialsPersistence,
+    FriendLinkPersistence, CredentialsPersistence,
     create_auto_backup, list_backups
 )
-from core.models import FriendLink, BackgroundConfig
-from .cat_follower import CatFollower
+from core.models import FriendLink
 from .lottery_frame import LotteryFrame
 from .activity_frame import ActivityFrame
 from .storage_frame import StorageFrame
 from .credentials_frame import CredentialsFrame
 from .bait_frame import BaitFrame
 from .backup_dialog import BackupRestoreDialog
-from .background_dialog import BackgroundDialog
 from .friend_links_dialog import FriendLinksDialog
 
 
@@ -31,14 +28,11 @@ class MainWindow:
     def __init__(self, app: ctk.CTk, data_dir: str):
         self.app = app
         self.data_dir = data_dir
-        self.background_image = None
-        self.background_photo = None
-        self.background_original_image = None  # Cache original raw image
-        self.background_original_alpha = None  # Cache original with opacity applied
-        self.last_cached_size = (0, 0)  # Last size we rendered for
-        self.background_config = None
         self.current_frame = None
         self._resize_after_id = None  # For debouncing resize
+
+        # Frame cache - cache created frames for faster switching instead of recreating
+        self._frame_cache = {}
 
         # All persistence instances will be initialized in background
         self.lottery_persistence = None
@@ -46,7 +40,6 @@ class MainWindow:
         self.storage_persistence = None
         self.bait_persistence = None
         self.friend_link_persistence = None
-        self.background_persistence = None
         self.credentials_persistence = None
 
         # Setup window
@@ -132,7 +125,6 @@ class MainWindow:
             self.storage_persistence = StoragePersistence(os.path.join(self.data_dir, 'storage.json'))
             self.bait_persistence = BaitPersistence(os.path.join(self.data_dir, 'bait.json'))
             self.friend_link_persistence = FriendLinkPersistence(os.path.join(self.data_dir, 'friend_links.json'))
-            self.background_persistence = BackgroundPersistence(os.path.join(self.data_dir, 'background.json'))
             self.credentials_persistence = CredentialsPersistence(os.path.join(self.data_dir, 'credentials.json'))
 
             # Create automatic backup on startup
@@ -147,10 +139,6 @@ class MainWindow:
                     shutil.rmtree(old_path, ignore_errors=True)
             # Create new backup
             create_auto_backup(self.data_dir, self.backup_dir)
-
-            # Load background config
-            self.loading_label.after(0, lambda: self.loading_label.configure(text="正在加载背景..."))
-            self.background_config = self.background_persistence.load_config()
 
             # All loading done - switch to main UI on main thread
             self.app.after(0, self._finish_loading)
@@ -169,32 +157,94 @@ class MainWindow:
         self.loading_frame.destroy()
 
         # Create main UI
-        self.create_background_canvas()
         self.create_main_content()
-        self.load_background()
         self.show_home_page()
 
-        # Update background again after window is fully rendered
-        self.app.after(200, self.update_background)
+        # Bind global keyboard shortcuts
+        self._bind_shortcuts()
 
-    def create_background_canvas(self):
-        """Create the background canvas with cat followers"""
-        self.bg_canvas = Canvas(
-            self.app,
-            highlightthickness=0,
-            bg='#1a1a1a'
-        )
-        self.bg_canvas.place(x=0, y=0, relwidth=1, relheight=1)
+    def _bind_shortcuts(self):
+        """Bind global keyboard shortcuts"""
+        # Ctrl+S: Save data
+        self.app.bind('<Control-s>', lambda e: self._handle_save_shortcut())
+        self.app.bind('<Control-S>', lambda e: self._handle_save_shortcut())
+        # Ctrl+N: Add new item
+        self.app.bind('<Control-n>', lambda e: self._handle_new_shortcut())
+        self.app.bind('<Control-N>', lambda e: self._handle_new_shortcut())
+        # Delete: Delete selected item
+        self.app.bind('<Delete>', lambda e: self._handle_delete_shortcut())
+        # Escape: Close toplevel dialog
+        self.app.bind('<Escape>', lambda e: self._handle_escape_shortcut())
 
-        # Create cat followers
-        self.cat_follower = CatFollower(self.bg_canvas, 3)
+    def _handle_save_shortcut(self):
+        """Handle Ctrl+S save shortcut"""
+        # Try to save on the current active frame
+        saved = False
+        # Check activity frame
+        if hasattr(self, 'activity_frame') and self.activity_frame.winfo_exists():
+            self.activity_frame.save_data()
+            saved = True
+        # Check storage frame
+        elif hasattr(self, 'storage_frame') and self.storage_frame.winfo_exists():
+            self.storage_frame.save_data()
+            saved = True
+        # Check bait frame
+        elif hasattr(self, 'bait_frame') and self.bait_frame.winfo_exists():
+            self.bait_frame.save_data()
+            saved = True
+        # No save needed for other frames (auto-save already)
 
-        # Bind mouse movement for cat followers
-        self.bg_canvas.bind('<Motion>', self.on_mouse_move)
-        self.bg_canvas.bind('<Configure>', self.on_canvas_resize)
+    def _handle_new_shortcut(self):
+        """Handle Ctrl+N new item shortcut"""
+        # Trigger add new on the current active frame
+        # Check activity frame
+        if hasattr(self, 'activity_frame') and self.activity_frame.winfo_exists():
+            # Activity frame adds new character
+            self.activity_frame.add_character()
+        # Check storage frame
+        elif hasattr(self, 'storage_frame') and self.storage_frame.winfo_exists():
+            self.storage_frame.add_character()
+        # Check bait frame
+        elif hasattr(self, 'bait_frame') and self.bait_frame.winfo_exists():
+            self.bait_frame.add_bait()
+        # Check lottery frame - no add needed
+        # Check credentials frame
+        elif hasattr(self, 'credentials_frame') and self.credentials_frame.winfo_exists():
+            self.credentials_frame.add_account()
 
-        # After canvas is created, create cats
-        self.app.after(100, self.cat_follower.create_cats)
+    def _handle_delete_shortcut(self):
+        """Handle Delete delete selected item shortcut"""
+        # Trigger delete selected on the current active frame
+        # Check activity frame
+        if hasattr(self, 'activity_frame') and self.activity_frame.winfo_exists():
+            self.activity_frame.delete_character()
+        # Check storage frame
+        elif hasattr(self, 'storage_frame') and self.storage_frame.winfo_exists():
+            self.storage_frame.delete_selected()
+        # Check bait frame
+        elif hasattr(self, 'bait_frame') and self.bait_frame.winfo_exists():
+            self.bait_frame.delete_selected()
+        # Check credentials frame
+        elif hasattr(self, 'credentials_frame') and self.credentials_frame.winfo_exists():
+            self.credentials_frame.delete_selected()
+
+    def _handle_escape_shortcut(self):
+        """Handle Escape shortcut - close toplevel dialog"""
+        # Find the toplevel window and close it
+        # The toplevel is the topmost window in the window stack
+        toplevel = None
+        for w in self.app.winfo_children():
+            if isinstance(w, ctk.CTkToplevel) and w.winfo_exists():
+                # Check if it's visible
+                if w.winfo_ismapped():
+                    toplevel = w
+        if toplevel:
+            try:
+                toplevel.grab_release()
+                toplevel.destroy()
+            except:
+                pass
+
 
     def create_main_content(self):
         """Create the main content container"""
@@ -227,25 +277,14 @@ class MainWindow:
         self.title_label.pack(side="left", padx=20, pady=15)
 
         # Content area - scrollable for any content size
-        # Use transparent to show background image through
-        self.content_container = ctk.CTkScrollableFrame(self.main_container, corner_radius=8, fg_color="transparent")
+        self.content_container = ctk.CTkScrollableFrame(self.main_container, corner_radius=8)
         self.content_container.pack(fill="both", expand=True, padx=15, pady=8)
 
-        # Bottom buttons bar (background and friend links)
+        # Bottom buttons bar (backup and friend links)
         self.bottom_bar = ctk.CTkFrame(self.main_container, fg_color="transparent")
         self.bottom_bar.pack(fill="x", padx=15, pady=(8, 15))
 
-        # Background button (left)
-        self.bg_button = ctk.CTkButton(
-            self.bottom_bar,
-            text="更换背景",
-            command=self.open_background_dialog,
-            width=100,
-            corner_radius=8
-        )
-        self.bg_button.pack(side="left", padx=5)
-
-        # Backup/Restore button (middle-left)
+        # Backup/Restore button (left)
         self.backup_button = ctk.CTkButton(
             self.bottom_bar,
             text="💾 备份恢复",
@@ -284,17 +323,25 @@ class MainWindow:
             text="欢迎使用 RF4 数据统计工具",
             font=ctk.CTkFont(size=32, weight="bold")
         )
-        welcome_label.pack(pady=(80, 50))
+        welcome_label.pack(pady=(60, 40))
 
-        # Button container
+        # Button container - use grid layout for better space usage on large screens
         btn_container = ctk.CTkFrame(home_frame, fg_color="transparent")
-        btn_container.pack(fill="x", padx=200, pady=30)
+        btn_container.pack(fill="both", expand=True, padx=50, pady=20)
 
-        # Big buttons for each function
-        btn_size = 240
+        # Configure grid: 2 columns, 3 rows, all cells equally weighted
+        btn_container.grid_rowconfigure(0, weight=1)
+        btn_container.grid_rowconfigure(1, weight=1)
+        btn_container.grid_rowconfigure(2, weight=1)
+        btn_container.grid_columnconfigure(0, weight=1)
+        btn_container.grid_columnconfigure(1, weight=1)
+
+        # Big buttons for each function - 2 columns x 3 rows grid layout
+        btn_size = 220
         btn_height = 80
         btn_font = ctk.CTkFont(size=20, weight="bold")
 
+        # Row 0
         activity_btn = ctk.CTkButton(
             btn_container,
             text="📊 活动统计",
@@ -306,7 +353,7 @@ class MainWindow:
             fg_color="#2c5aa0",
             hover_color="#1a3d66"
         )
-        activity_btn.pack(pady=10)
+        activity_btn.grid(row=0, column=0, padx=20, pady=15)
 
         storage_btn = ctk.CTkButton(
             btn_container,
@@ -319,8 +366,9 @@ class MainWindow:
             fg_color="#2c5aa0",
             hover_color="#1a3d66"
         )
-        storage_btn.pack(pady=10)
+        storage_btn.grid(row=0, column=1, padx=20, pady=15)
 
+        # Row 1
         bait_btn = ctk.CTkButton(
             btn_container,
             text="🎣 饵料库存",
@@ -332,7 +380,7 @@ class MainWindow:
             fg_color="#2c5aa0",
             hover_color="#1a3d66"
         )
-        bait_btn.pack(pady=10)
+        bait_btn.grid(row=1, column=0, padx=20, pady=15)
 
         lottery_btn = ctk.CTkButton(
             btn_container,
@@ -345,8 +393,9 @@ class MainWindow:
             fg_color="#2c5aa0",
             hover_color="#1a3d66"
         )
-        lottery_btn.pack(pady=10)
+        lottery_btn.grid(row=1, column=1, padx=20, pady=15)
 
+        # Row 2
         credentials_btn = ctk.CTkButton(
             btn_container,
             text="🔐 账号管理",
@@ -358,16 +407,17 @@ class MainWindow:
             fg_color="#2c5aa0",
             hover_color="#1a3d66"
         )
-        credentials_btn.pack(pady=10)
+        credentials_btn.grid(row=2, column=0, padx=20, pady=15)
 
         self.current_frame = home_frame
         # Update scrollable region after adding content
         self.content_container.update()
 
     def clear_current_content(self):
-        """Clear the current content frame"""
+        """Clear the current content frame - for cached frames, just unpact don't destroy"""
         if self.current_frame is not None:
-            self.current_frame.destroy()
+            self.current_frame.pack_forget()
+            # Don't destroy cached frames, they are kept in cache
             self.current_frame = None
 
     def show_activity_stats(self):
@@ -376,16 +426,24 @@ class MainWindow:
         self.back_button.pack(side="left", padx=(10, 0), pady=10)
         self.clear_current_content()
 
-        frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
-        frame.pack(fill="both", expand=True)
-
-        self.activity_frame = ActivityFrame(
-            frame,
-            self.activity_persistence
-        )
-        self.activity_frame.pack(fill="both", expand=True)
-
+        # Use cached frame if already created
+        cache_key = "activity_stats"
+        if cache_key in self._frame_cache:
+            frame, activity_frame = self._frame_cache[cache_key]
+            frame.pack(fill="both", expand=True)
+            activity_frame.update()  # Refresh display
+        else:
+            frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+            frame.pack(fill="both", expand=True)
+            activity_frame = ActivityFrame(
+                frame,
+                self.activity_persistence
+            )
+            activity_frame.pack(fill="both", expand=True)
+            self._frame_cache[cache_key] = (frame, activity_frame)
+        self.activity_frame = activity_frame
         self.current_frame = frame
+
         # Update scrollable region after adding content
         self.content_container.update()
 
@@ -395,16 +453,24 @@ class MainWindow:
         self.back_button.pack(side="left", padx=(10, 0), pady=10)
         self.clear_current_content()
 
-        frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
-        frame.pack(fill="both", expand=True)
-
-        self.storage_frame = StorageFrame(
-            frame,
-            self.storage_persistence
-        )
-        self.storage_frame.pack(fill="both", expand=True)
-
+        # Use cached frame if already created
+        cache_key = "storage"
+        if cache_key in self._frame_cache:
+            frame, storage_frame = self._frame_cache[cache_key]
+            frame.pack(fill="both", expand=True)
+            storage_frame.update_table()  # Refresh display
+        else:
+            frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+            frame.pack(fill="both", expand=True)
+            storage_frame = StorageFrame(
+                frame,
+                self.storage_persistence
+            )
+            storage_frame.pack(fill="both", expand=True)
+            self._frame_cache[cache_key] = (frame, storage_frame)
+        self.storage_frame = storage_frame
         self.current_frame = frame
+
         # Update scrollable region after adding content
         self.content_container.update()
 
@@ -414,16 +480,24 @@ class MainWindow:
         self.back_button.pack(side="left", padx=(10, 0), pady=10)
         self.clear_current_content()
 
-        frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
-        frame.pack(fill="both", expand=True)
-
-        self.lottery_frame = LotteryFrame(
-            frame,
-            self.lottery_persistence
-        )
-        self.lottery_frame.pack(fill="both", expand=True)
-
+        # Use cached frame if already created
+        cache_key = "lottery"
+        if cache_key in self._frame_cache:
+            frame, lottery_frame = self._frame_cache[cache_key]
+            frame.pack(fill="both", expand=True)
+            lottery_frame.draw_wheel()  # Refresh display
+        else:
+            frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+            frame.pack(fill="both", expand=True)
+            lottery_frame = LotteryFrame(
+                frame,
+                self.lottery_persistence
+            )
+            lottery_frame.pack(fill="both", expand=True)
+            self._frame_cache[cache_key] = (frame, lottery_frame)
+        self.lottery_frame = lottery_frame
         self.current_frame = frame
+
         # Update scrollable region after adding content
         self.content_container.update()
 
@@ -433,16 +507,24 @@ class MainWindow:
         self.back_button.pack(side="left", padx=(10, 0), pady=10)
         self.clear_current_content()
 
-        frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
-        frame.pack(fill="both", expand=True)
-
-        self.credentials_frame = CredentialsFrame(
-            frame,
-            self.credentials_persistence
-        )
-        self.credentials_frame.pack(fill="both", expand=True)
-
+        # Use cached frame if already created
+        cache_key = "credentials"
+        if cache_key in self._frame_cache:
+            frame, credentials_frame = self._frame_cache[cache_key]
+            frame.pack(fill="both", expand=True)
+            credentials_frame.update_dropdown()  # Refresh display
+        else:
+            frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+            frame.pack(fill="both", expand=True)
+            credentials_frame = CredentialsFrame(
+                frame,
+                self.credentials_persistence
+            )
+            credentials_frame.pack(fill="both", expand=True)
+            self._frame_cache[cache_key] = (frame, credentials_frame)
+        self.credentials_frame = credentials_frame
         self.current_frame = frame
+
         # Update scrollable region after adding content
         self.content_container.update()
 
@@ -452,149 +534,26 @@ class MainWindow:
         self.back_button.pack(side="left", padx=(10, 0), pady=10)
         self.clear_current_content()
 
-        frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
-        frame.pack(fill="both", expand=True)
-
-        self.bait_frame = BaitFrame(
-            frame,
-            self.bait_persistence
-        )
-        self.bait_frame.pack(fill="both", expand=True)
-
+        # Use cached frame if already created
+        cache_key = "bait"
+        if cache_key in self._frame_cache:
+            frame, bait_frame = self._frame_cache[cache_key]
+            frame.pack(fill="both", expand=True)
+            bait_frame.update_table()  # Refresh display
+        else:
+            frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+            frame.pack(fill="both", expand=True)
+            bait_frame = BaitFrame(
+                frame,
+                self.bait_persistence
+            )
+            bait_frame.pack(fill="both", expand=True)
+            self._frame_cache[cache_key] = (frame, bait_frame)
+        self.bait_frame = bait_frame
         self.current_frame = frame
+
         # Update scrollable region after adding content
         self.content_container.update()
-
-    def load_background(self):
-        """Load background configuration from file"""
-        self.background_config = self.background_persistence.load_config()
-
-        # Check default background
-        # Get correct path whether running as source or packaged exe
-        if getattr(sys, 'frozen', False):
-            # Running as PyInstaller exe
-            base_path = os.path.dirname(sys.executable)
-        else:
-            # Running as source code
-            # __file__ = src/gui/main_window.py → go up 3 levels: src/gui/ → main/
-            base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-
-        default_bg = os.path.join(base_path, '微信图片_20250817002102.jpg')
-
-        if self.background_config.image_path is None and os.path.exists(default_bg):
-            self.background_config.image_path = default_bg
-
-        self.update_background()
-
-    def update_background(self):
-        """Update the background image on canvas"""
-        if self.background_config and self.background_config.image_path:
-            if os.path.exists(self.background_config.image_path):
-                try:
-                    canvas_width = self.bg_canvas.winfo_width()
-                    canvas_height = self.bg_canvas.winfo_height()
-                    # If canvas not yet sized (during startup), use current window size
-                    if canvas_width <= 1:
-                        canvas_width = self.app.winfo_width()
-                    if canvas_height <= 1:
-                        canvas_height = self.app.winfo_height()
-                    # If still not sized, schedule a retry - don't give up permanently
-                    if canvas_width <= 1 or canvas_height <= 1:
-                        self.app.after(100, self.update_background)
-                        return
-
-                    # Check if we need to rebuild the alpha cached original
-                    # Rebuild if:
-                    # 1. No cache doesn't exist
-                    # 2. Image path changed
-                    # 3. Opacity changed
-                    needs_rebuild_alpha = (
-                        self.background_original_alpha is None or
-                        getattr(self, '_last_bg_path', None) != self.background_config.image_path or
-                        getattr(self, '_last_opacity', None) != self.background_config.opacity
-                    )
-
-                    if needs_rebuild_alpha:
-                        self._last_bg_path = self.background_config.image_path
-                        self._last_opacity = self.background_config.opacity
-                        # Load original image
-                        self.background_original_image = Image.open(self.background_config.image_path)
-                        # Pre-process with opacity once
-                        original = self.background_original_image
-                        if original.mode != 'RGBA':
-                            original = original.convert('RGBA')
-                        # Apply opacity to the original image
-                        alpha = int(self.background_config.opacity * 255)
-                        alpha_channel = Image.new('L', original.size, alpha)
-                        original.putalpha(alpha_channel)
-                        self.background_original_alpha = original
-                        # Force resize cache is invalid now
-                        self.last_cached_size = (0, 0)
-
-                    # Only re-resize if size changed significantly (> 20px)
-                    # This avoids re-rendering for tiny resize adjustments
-                    last_w, last_h = self.last_cached_size
-                    size_changed_enough = (
-                        abs(canvas_width - last_w) > 20 or
-                        abs(canvas_height - last_h) > 20
-                    )
-
-                    if size_changed_enough or self.background_photo is None:
-                        # Resize from pre-processed original with alpha
-                        image = self.background_original_alpha.resize(
-                            (canvas_width, canvas_height),
-                            Image.Resampling.LANCZOS
-                        )
-                        # We need to keep a reference
-                        self.background_image = image
-                        self.background_photo = ImageTk.PhotoImage(image)
-                        self.last_cached_size = (canvas_width, canvas_height)
-
-                    # Update canvas
-                    self.bg_canvas.delete("background")
-                    self.bg_canvas.create_image(
-                        0, 0,
-                        image=self.background_photo,
-                        anchor="nw",
-                        tags=("background",)
-                    )
-                    # Set opacity by changing canvas alpha - need to redraw cats on top
-                    self.bg_canvas.tag_lower("background")
-                except Exception as e:
-                    messagebox.showerror("错误", f"加载背景图片失败: {str(e)}")
-
-    def on_mouse_move(self, event):
-        """Handle mouse movement to update cat positions"""
-        self.cat_follower.update_position(event.x, event.y)
-
-    def on_canvas_resize(self, event):
-        """Handle canvas resize with debouncing for performance"""
-        self.cat_follower.on_resize(event)
-        # Debounce: only update background after resize stops for 200ms
-        if self._resize_after_id is not None:
-            self.app.after_cancel(self._resize_after_id)
-        self._resize_after_id = self.app.after(200, self.update_background)
-
-    def open_background_dialog(self):
-        """Open dialog to change background image"""
-        dialog = BackgroundDialog(
-            self.app,
-            self.background_config,
-            self.on_background_changed,
-            self.data_dir
-        )
-
-    def on_background_changed(self, new_config: BackgroundConfig):
-        """Callback when background config is changed"""
-        self.background_config = new_config
-        self.background_persistence.save_config(new_config)
-        # Invalidate all caches when background changes
-        self.background_original_image = None
-        self.background_original_alpha = None
-        self.last_cached_size = (0, 0)
-        self._last_bg_path = None
-        self._last_opacity = None
-        self.update_background()
 
     def open_friend_links(self):
         """Open friend links dialog"""

@@ -9,7 +9,6 @@ from .models import (
     ActivityCharacter,
     StorageCharacter,
     FriendLink,
-    BackgroundConfig,
 )
 
 __all__ = [
@@ -22,5 +21,4 @@ __all__ = [
     'ActivityCharacter',
     'StorageCharacter',
     'FriendLink',
-    'BackgroundConfig',
 ]

@@ -1,6 +1,7 @@
 """Activity statistics frame (grinding + star waiting)"""
 import customtkinter as ctk
-from tkinter import ttk, Listbox, messagebox
+from tkinter import ttk, Listbox
+from CTkMessagebox import CTkMessagebox
 from datetime import date
 from typing import List, Optional
 import json
@@ -25,6 +26,11 @@ class ActivityFrame(ctk.CTkFrame):
         self.current_character: Optional[ActivityCharacter] = None
         # Global suggestion settings (not per-character)
         self.global_suggestion_settings = SuggestionUserSettings()
+        # Sorting state for each activity type
+        self._sort_state = {
+            ActivityType.GRINDING: ("日期", True),
+            ActivityType.STAR_WAITING: ("日期", True),
+        }
 
         self.create_widgets()
         self.load_data()
@@ -241,13 +247,19 @@ class ActivityFrame(ctk.CTkFrame):
             columns = ("日期", "成功数量", "时长(分钟)")
 
         tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=8)
+        # Bind click on heading for sorting
         for col in columns:
-            tree.heading(col, text=col)
+            tree.heading(col, text=col, command=lambda c=col, at=activity_type: self._sort_by_column(at, c))
             tree.column(col, width=100, anchor="center")
         tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-        style = ttk.Style()
-        style.configure("Treeview", background="#333333", foreground="white", fieldbackground="#333333")
+        # Configure dark theme style for Treeview - only need to do this once globally
+        if not hasattr(ActivityFrame, '_tree_style_configured'):
+            style = ttk.Style()
+            style.configure("Treeview", background="#333333", foreground="white", fieldbackground="#333333")
+            # Also configure heading for better dark theme appearance
+            style.configure("Treeview.Heading", background="#444444", foreground="white")
+            setattr(ActivityFrame, '_tree_style_configured', True)
 
         if not hasattr(self, '_trees'):
             self._trees = {}
@@ -405,17 +417,40 @@ class ActivityFrame(ctk.CTkFrame):
         for item in tree.get_children():
             tree.delete(item)
         today = date.today()
-        for record in self.current_character.records:
-            if record.date == today and record.activity_type == activity_type:
-                if activity_type == ActivityType.GRINDING:
-                    value = record.silver_count
-                else:
-                    value = record.success_count
-                tree.insert(
-                    "",
-                    ctk.END,
-                    values=(record.date.strftime("%Y-%m-%d"), f"{value:,}", record.duration_minutes)
-                )
+
+        # Collect all today records for this activity
+        records = [
+            record for record in self.current_character.records
+            if record.date == today and record.activity_type == activity_type
+        ]
+
+        # Sort based on current sort settings
+        sort_col, sort_asc = self._sort_state[activity_type]
+        if sort_col == "日期":
+            key_func = lambda r: r.date
+        elif sort_col == "银币" or sort_col == "成功数量":
+            if activity_type == ActivityType.GRINDING:
+                key_func = lambda r: r.silver_count
+            else:
+                key_func = lambda r: r.success_count
+        elif sort_col == "时长(分钟)":
+            key_func = lambda r: r.duration_minutes
+        else:
+            key_func = lambda r: r.date
+
+        records.sort(key=key_func, reverse=not sort_asc)
+
+        # Insert sorted records
+        for record in records:
+            if activity_type == ActivityType.GRINDING:
+                value = record.silver_count
+            else:
+                value = record.success_count
+            tree.insert(
+                "",
+                ctk.END,
+                values=(record.date.strftime("%Y-%m-%d"), f"{value:,}", record.duration_minutes)
+            )
 
     def add_character(self):
         """Add a new character"""
@@ -563,6 +598,21 @@ class ActivityFrame(ctk.CTkFrame):
         """Save all data to persistence"""
         self.persistence.save_characters(self.characters, self.global_suggestion_settings)
 
+    def _sort_by_column(self, activity_type: ActivityType, column: str):
+        """Sort the records table by the clicked column"""
+        if not self.current_character:
+            return
+
+        # Toggle sort order if clicking the same column again
+        current_col, current_asc = self._sort_state[activity_type]
+        if column == current_col:
+            self._sort_state[activity_type] = (column, not current_asc)
+        else:
+            self._sort_state[activity_type] = (column, True)
+
+        # Redraw the display with sorted data
+        self.update_display(activity_type)
+
 
 class AddCharacterDialog(ctk.CTkToplevel):
     """Dialog to add a new character"""
@@ -691,11 +741,10 @@ class SetGoalDialog(ctk.CTkToplevel):
                 self.after(10, lambda: self._cleanup())
             else:
                 # Invalid values - show message
-                messagebox.showwarning("输入错误", "数值不能为负数，请重新输入")
+                CTkMessagebox(title="输入错误", message="数值不能为负数，请重新输入", icon="warning", option_1="确定")
         except ValueError:
             # Invalid input - show message
-            from tkinter import messagebox
-            messagebox.showwarning("输入错误", "请输入有效的数字")
+            CTkMessagebox(title="输入错误", message="请输入有效的数字", icon="warning", option_1="确定")
 
     def _cleanup(self):
         """Clean up and close dialog"""
@@ -773,11 +822,10 @@ class AddRecordDialog(ctk.CTkToplevel):
                 self.after(10, lambda: self._cleanup())
             else:
                 # Invalid values - show message
-                messagebox.showwarning("输入错误", "数值不能为负数，请重新输入")
+                CTkMessagebox(title="输入错误", message="数值不能为负数，请重新输入", icon="warning", option_1="确定")
         except ValueError:
             # Invalid input - show message
-            from tkinter import messagebox
-            messagebox.showwarning("输入错误", "请输入有效的数字")
+            CTkMessagebox(title="输入错误", message="请输入有效的数字", icon="warning", option_1="确定")
 
     def _cleanup(self):
         """Clean up and close dialog"""
@@ -862,11 +910,10 @@ class SuggestionSettingsDialog(ctk.CTkToplevel):
                 self.after(10, lambda: self._cleanup())
             else:
                 # Invalid values - show message
-                messagebox.showwarning("输入错误", "数值必须大于0，请重新输入")
+                CTkMessagebox(title="输入错误", message="数值必须大于0，请重新输入", icon="warning", option_1="确定")
         except ValueError:
             # Invalid input - show message
-            from tkinter import messagebox
-            messagebox.showwarning("输入错误", "请输入有效的数字")
+            CTkMessagebox(title="输入错误", message="请输入有效的数字", icon="warning", option_1="确定")
 
     def _cleanup(self):
         """Clean up and close dialog"""

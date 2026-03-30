@@ -3,7 +3,7 @@ import pytest
 from datetime import date
 from core.models import (
     LotteryPrize, ActivityRecord, ActivityCharacter, StorageCharacter,
-    FriendLink, BackgroundConfig, ActivityGoal, ActivitySuggestion,
+    FriendLink, ActivityGoal, ActivitySuggestion,
     SuggestionUserSettings, ActivityType, ActivityCharacter, StorageCharacter
 )
 
@@ -304,30 +304,6 @@ class TestFriendLink:
 
         with pytest.raises(ValueError):
             FriendLink(text="测试", url="")
-
-
-class TestBackgroundConfig:
-    """Tests for BackgroundConfig model"""
-
-    def test_create_background_config(self):
-        """Test creating background config"""
-        config = BackgroundConfig(image_path="test.jpg", opacity=0.8)
-        assert config.image_path == "test.jpg"
-        assert config.opacity == 0.8
-
-    def test_create_background_config_defaults(self):
-        """Test default values for background config"""
-        config = BackgroundConfig()
-        assert config.image_path is None
-        assert config.opacity == 1.0
-
-    def test_opacity_validation(self):
-        """Test that opacity is clamped between 0 and 1"""
-        config = BackgroundConfig(opacity=-0.5)
-        assert config.opacity == 0.0
-
-        config = BackgroundConfig(opacity=1.5)
-        assert config.opacity == 1.0
 
 
 class TestActivityGoal:

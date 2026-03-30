@@ -1,6 +1,5 @@
 """Account credentials manager frame (with encrypted password storage)"""
 import customtkinter as ctk
-from tkinter import messagebox
 import pyperclip
 from typing import List
 from CTkMessagebox import CTkMessagebox
@@ -335,4 +334,4 @@ class AddEditAccountDialog(ctk.CTkToplevel):
             self.grab_release()
             self.destroy()
         else:
-            messagebox.showwarning("输入错误", "账号名称和密码不能为空")
+            CTkMessagebox(title="输入错误", message="账号名称和密码不能为空", icon="warning", option_1="确定")

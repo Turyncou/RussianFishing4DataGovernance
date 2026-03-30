@@ -5,7 +5,6 @@ from .persistence import (
     ActivityPersistence,
     StoragePersistence,
     FriendLinkPersistence,
-    BackgroundPersistence,
 )
 
 __all__ = [
@@ -14,5 +13,4 @@ __all__ = [
     'ActivityPersistence',
     'StoragePersistence',
     'FriendLinkPersistence',
-    'BackgroundPersistence',
 ]

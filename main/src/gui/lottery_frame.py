@@ -2,7 +2,8 @@
 import math
 import random
 import customtkinter as ctk
-from tkinter import Canvas, messagebox
+from tkinter import Canvas
+from CTkMessagebox import CTkMessagebox
 from typing import List
 
 from core.models import LotteryPrize
@@ -170,12 +171,12 @@ class LotteryFrame(ctk.CTkFrame):
             return
 
         if not self.prizes:
-            messagebox.showwarning("警告", "请先设置奖项")
+            CTkMessagebox(title="警告", message="请先设置奖项", icon="warning", option_1="确定")
             return
 
         total_probability = sum(p.probability for p in self.prizes)
         if total_probability <= 0:
-            messagebox.showwarning("警告", "总概率必须大于0")
+            CTkMessagebox(title="警告", message="总概率必须大于0", icon="warning", option_1="确定")
             return
 
         self.is_spinning = True
@@ -392,24 +393,28 @@ class PrizeSettingsDialog(ctk.CTkToplevel):
             try:
                 prob = float(row['prob_var'].get())
                 if prob < 0 or prob > 100:
-                    messagebox.showwarning("警告", "概率必须在0-100之间")
+                    CTkMessagebox(title="警告", message="概率必须在0-100之间", icon="warning", option_1="确定")
                     return
                 color = row['color_var'].get().strip() or "#cccccc"
                 new_prizes.append(LotteryPrize(name, prob, color))
             except ValueError:
-                messagebox.showwarning("警告", "概率必须是数字")
+                CTkMessagebox(title="警告", message="概率必须是数字", icon="warning", option_1="确定")
                 return
 
         total = sum(p.probability for p in new_prizes)
         if total <= 0:
-            messagebox.showwarning("警告", "总概率必须大于0")
+            CTkMessagebox(title="警告", message="总概率必须大于0", icon="warning", option_1="确定")
             return
 
         if abs(total - 100) > 0.1:
-            result = messagebox.askyesno(
-                "提示",
-                f"当前总概率为 {total:.1f}%, 不等于100%, 是否继续保存?"
+            result = CTkMessagebox(
+                title="提示",
+                message=f"当前总概率为 {total:.1f}%, 不等于100%, 是否继续保存?",
+                icon="question",
+                option_1="否",
+                option_2="是"
             )
+            result = result.get() == "是"
             if not result:
                 return
 

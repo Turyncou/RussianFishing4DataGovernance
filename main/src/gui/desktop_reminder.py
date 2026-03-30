@@ -1,6 +1,7 @@
 """Desktop floating reminder with circular placeholder (will replace with Live2D later)"""
 import customtkinter as ctk
-from tkinter import Canvas, messagebox
+from tkinter import Canvas
+from CTkMessagebox import CTkMessagebox
 from datetime import datetime
 from typing import Optional
 import random
@@ -796,11 +797,11 @@ class CustomReminderDialog(ctk.CTkToplevel):
                 self.after(10, self.destroy)
             else:
                 if minutes <= 0:
-                    messagebox.showwarning("输入错误", "提醒分钟数必须大于0")
+                    CTkMessagebox(title="输入错误", message="提醒分钟数必须大于0", icon="warning", option_1="确定")
                 else:
-                    messagebox.showwarning("输入错误", "提醒内容不能为空")
+                    CTkMessagebox(title="输入错误", message="提醒内容不能为空", icon="warning", option_1="确定")
         except ValueError:
-            messagebox.showwarning("输入错误", "请输入有效的分钟数")
+            CTkMessagebox(title="输入错误", message="请输入有效的分钟数", icon="warning", option_1="确定")
 
 
 # Add new toggle methods to DesktopReminderWindow

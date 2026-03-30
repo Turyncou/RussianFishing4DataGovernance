@@ -1,6 +1,7 @@
 """Grinding statistics frame"""
 import customtkinter as ctk
-from tkinter import ttk, Listbox, messagebox
+from tkinter import ttk, Listbox
+from CTkMessagebox import CTkMessagebox
 from datetime import date
 from typing import List, Optional
 import json
@@ -21,6 +22,9 @@ class GrindingFrame(ctk.CTkFrame):
         self.current_character: Optional[GrindingCharacter] = None
         # Load saved API settings
         self.api_settings = self.load_api_settings()
+        # Sorting state
+        self._sort_column = "日期"
+        self._sort_ascending = False  # Default: newest first
 
         self.create_widgets()
         self.load_data()
@@ -177,13 +181,19 @@ class GrindingFrame(ctk.CTkFrame):
         # Treeview for records
         columns = ("日期", "银币", "时长(分钟)")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=8)
+        # Bind click on heading for sorting
         for col in columns:
-            self.tree.heading(col, text=col)
+            self.tree.heading(col, text=col, command=lambda c=col: self._sort_by_column(c))
             self.tree.column(col, width=100, anchor="center")
         self.tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-        style = ttk.Style()
-        style.configure("Treeview", background="#333333", foreground="white", fieldbackground="#333333")
+        # Configure dark theme style for Treeview - only need to do this once globally
+        if not hasattr(self.__class__, '_tree_style_configured'):
+            style = ttk.Style()
+            style.configure("Treeview", background="#333333", foreground="white", fieldbackground="#333333")
+            # Also configure heading for better dark theme appearance
+            style.configure("Treeview.Heading", background="#444444", foreground="white")
+            setattr(self.__class__, '_tree_style_configured', True)
 
         # Add record button
         add_record_btn = ctk.CTkButton(
@@ -262,13 +272,32 @@ class GrindingFrame(ctk.CTkFrame):
         for item in self.tree.get_children():
             self.tree.delete(item)
         today = date.today()
-        for record in self.current_character.records:
-            if record.date == today:
-                self.tree.insert(
-                    "",
-                    ctk.END,
-                    values=(record.date.strftime("%Y-%m-%d"), f"{record.silver_count:,}", record.duration_minutes)
-                )
+
+        # Collect all today records and sort
+        records = [
+            record for record in self.current_character.records
+            if record.date == today
+        ]
+
+        # Sort based on current sort settings
+        if self._sort_column == "日期":
+            key_func = lambda r: r.date
+        elif self._sort_column == "银币":
+            key_func = lambda r: r.silver_count
+        elif self._sort_column == "时长(分钟)":
+            key_func = lambda r: r.duration_minutes
+        else:
+            key_func = lambda r: r.date
+
+        records.sort(key=key_func, reverse=not self._sort_ascending)
+
+        # Insert sorted records
+        for record in records:
+            self.tree.insert(
+                "",
+                ctk.END,
+                values=(record.date.strftime("%Y-%m-%d"), f"{record.silver_count:,}", record.duration_minutes)
+            )
 
     def add_character(self):
         """Add a new character"""
@@ -412,6 +441,25 @@ class GrindingFrame(ctk.CTkFrame):
         self.persistence.save_characters(self.characters)
         self.save_api_settings()
 
+    def _sort_by_column(self, column: str):
+        """Sort the records table by the clicked column"""
+        if not self.current_character:
+            return
+
+        # Toggle sort order if clicking the same column again
+        if column == self._sort_column:
+            self._sort_ascending = not self._sort_ascending
+        else:
+            self._sort_column = column
+            # For date, default descending (newest first)
+            if column == "日期":
+                self._sort_ascending = False
+            else:
+                self._sort_ascending = True
+
+        # Redraw the display with sorted data
+        self.update_display()
+
     def load_api_settings(self):
         """Load saved API settings from file"""
         api_file = os.path.join(os.path.dirname(self.persistence.file_path), 'api_settings.json')
@@ -491,8 +539,7 @@ class AddCharacterDialog(ctk.CTkToplevel):
             self.grab_release()
             self.destroy()
         else:
-            from tkinter import messagebox
-            messagebox.showwarning("输入错误", "角色名称不能为空")
+            CTkMessagebox(title="输入错误", message="角色名称不能为空", icon="warning", option_1="确定")
 
 
 class SetGoalDialog(ctk.CTkToplevel):
@@ -556,11 +603,10 @@ class SetGoalDialog(ctk.CTkToplevel):
                 self.destroy()
             else:
                 # Invalid values - show message
-                messagebox.showwarning("输入错误", "数值不能为负数，请重新输入")
+                CTkMessagebox(title="输入错误", message="数值不能为负数，请重新输入", icon="warning", option_1="确定")
         except ValueError:
             # Invalid input - show message
-            from tkinter import messagebox
-            messagebox.showwarning("输入错误", "请输入有效的数字")
+            CTkMessagebox(title="输入错误", message="请输入有效的数字", icon="warning", option_1="确定")
 
     def clear(self):
         self.callback(0, 0)
@@ -619,11 +665,10 @@ class AddRecordDialog(ctk.CTkToplevel):
                 self.destroy()
             else:
                 # Invalid values - show message
-                messagebox.showwarning("输入错误", "数值不能为负数，请重新输入")
+                CTkMessagebox(title="输入错误", message="数值不能为负数，请重新输入", icon="warning", option_1="确定")
         except ValueError:
             # Invalid input - show message
-            from tkinter import messagebox
-            messagebox.showwarning("输入错误", "请输入有效的数字")
+            CTkMessagebox(title="输入错误", message="请输入有效的数字", icon="warning", option_1="确定")
 
 
 class ApiSettingsDialog(ctk.CTkToplevel):
