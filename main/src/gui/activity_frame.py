@@ -856,39 +856,29 @@ class AddRecordDialog(ctk.CTkToplevel):
         self.after(10, lambda: [self.grab_release(), self.destroy()])
 
     def _clean_digits(self, text):
-        """Extract only digits from input text - simplest possible implementation
-        Map every possible digit character to its value using Unicode codes
+        """Extract only digits from input text
+        Supports both half-width (ASCII) and full-width (Chinese input) digits
         Never fails, always returns an integer >= 0
         """
         try:
             if not text:
                 return 0
-            text_str = str(text)
             result_digits = []
-            chars_found = []
-            for c in text_str:
+            for c in str(text):
                 code = ord(c)
-                chars_found.append(f"'{c}'(0x{code:04X})")
                 # ASCII half-width digits 0-9: codes 48-57
                 if 48 <= code <= 57:
                     result_digits.append(c)
-                # Full-width digits ０-９: codes 0xFF10-0xFF19
+                # Full-width digits ０-９: codes 0xFF10-0xFF19 (Chinese input)
                 elif 0xFF10 <= code <= 0xFF19:
                     # Convert to ASCII digit
                     ascii_code = code - 0xFF10 + 48
                     result_digits.append(chr(ascii_code))
             if not result_digits:
-                # Debug: show what we got
-                from CTkMessagebox import CTkMessagebox
-                CTkMessagebox(title="Debug: 没有提取到数字",
-                             message=f"输入内容: '{text_str}'\n所有字符: {', '.join(chars_found)}\n提取结果为空，返回0",
-                             icon="info", option_1="确定")
                 return 0
             result = int(''.join(result_digits))
             return max(0, result)
-        except Exception as e:
-            from CTkMessagebox import CTkMessagebox
-            CTkMessagebox(title="Debug: 提取出错", message=f"错误: {str(e)}", icon="warning", option_1="确定")
+        except Exception:
             return 0
 
     def confirm(self):
@@ -903,14 +893,6 @@ class AddRecordDialog(ctk.CTkToplevel):
                 duration_text = self.duration_entry.get()
                 value = self._clean_digits(value_text)
                 duration = self._clean_digits(duration_text)
-                value = max(0, value)
-                duration = max(0, duration)
-
-                # Debug - show what we got
-                CTkMessagebox(title="Debug: 提取结果",
-                             message=f"银币/数量输入: '{value_text}' → 提取: {value}\n时长输入: '{duration_text}' → 提取: {duration}",
-                             icon="info", option_1="继续")
-
                 value = max(0, value)
                 duration = max(0, duration)
                 self.callback(self.activity_type, value, duration)
