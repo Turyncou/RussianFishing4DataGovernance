@@ -6,8 +6,17 @@
 
 这是为 **Russian Fishing 4** 制作的综合性数据管理工具，包含两个主要部分：
 
-1. **核心活动调度优化** - 基于贪心算法，根据不同活动类型（A 需要专注 / B 可以并行）给出每日最优收益组合
-2. **完整 CustomTkinter GUI 桌面应用** - 提供数据统计、转盘抽奖、窝子计时、桌面悬浮提醒等功能
+1. **核心活动调度优化** - 基于贪心算法，根据不同活动类型（需要专注 / 可以并行）给出每日最优收益组合
+2. **完整桌面 GUI 应用** - 提供数据统计、转盘抽奖、饵料库存、账号密码管理、桌面悬浮提醒等功能
+
+## 版本说明
+
+本项目现在提供**两个 GUI 版本**：
+
+| 版本 | 框架 | 位置 | 特点 |
+|------|------|------|------|
+| CustomTkinter 版 | CustomTkinter | `main/` | 原始实现，界面圆角美观 |
+| **PySide6 版 (推荐)** | PySide6 | `qt/` | 原生性能更好，界面更流畅，推荐使用 |
 
 ## 功能特性
 
@@ -21,40 +30,50 @@
 - **切换开销** - 自动计算 15-20 分钟切换开销
 - **文件监听** - 自动监听数据文件变化，自动重新计算推荐
 
-### GUI 桌面应用
-- 📊 **搬砖统计** - 多角色银币/时间统计，每日追踪，目标进度条
-- ⏱️ **窝子计时** - 每个钓鱼点累计耗时统计，可随时增减时间
-- 🔄 **转盘抽奖** - 可配置奖品转盘，随机抽奖
-- 🔗 **友情链接** - 可编辑好友直播链接，一键打开
-- 🐱 **三只小猫** - 主窗口右下角三只小猫，眼睛/头部跟随鼠标移动
-- 🖼 **自定义背景** - 支持自定义背景图片，透明度调整
-- 💬 **桌面悬浮提醒** - 独立悬浮窗，定时提醒休息/喝水/作息，气泡尖端正对模型，点击任意位置关闭
-- 📋 **活动推荐** - 集成核心调度算法，展示推荐结果
-- 📦 **可打包单文件 exe** - 使用 PyInstaller 打包，可在无 Python 环境运行
+### PySide6 GUI 桌面应用 (qt 目录)
+
+✅ **📊 活动统计** - 多角色搬砖/蹲星统计，每日记录，目标进度条，活动推荐计算器
+✅ **📈 数据分析** - 四个可视化图表，动画加载，每日收益趋势、角色对比、活动分布，全数据统计
+✅ **📦 存储计时** - 多个窝子累计时长追踪，随时增减时间
+✅ **🎣 饵料库存** - 饵料/钓具购买使用剩余统计，实时更新库存
+✅ **🎡 转盘抽奖** - 可配置奖品转盘，自定义概率和颜色，随机抽奖
+✅ **🔐 账号管理** - 加密存储账号密码，Fernet 对称加密，一键复制密码，保护隐私
+✅ **🔗 友情链接** - 可编辑好友直播链接，一键打开浏览器
+✅ **💬 桌面悬浮提醒** - 独立悬浮窗，定时提醒休息/喝水/作息，每日固定提醒，自定义提醒，点击不抢游戏焦点
+✅ **💾 备份恢复** - 自动备份，手动备份，恢复，导出全部数据到 Excel
+✅ **🌙 深色主题** - 完整深色主题，长时间使用保护眼睛
+✅ **🐎 原生流畅** - PySide6 原生性能，界面响应更快
 
 ## 项目架构
 
 ```
 RussianFishing4DataGovernance/
-├── data/                               # 输出数据目录（程序自动创建）
+├── data/                               # 核心调度示例数据
 │   ├── activities.csv                 # 活动定义
 │   └── user.json                      # 用户配置
 ├── main/
 │   └── src/
-│       ├── core/                     # GUI 业务逻辑层
-│       │   ├── __init__.py
-│       │   ├── data_manager.py       # 统一 JSON 持久化，自动备份
-│       │   ├── lucky_draw.py        # 转盘抽奖业务逻辑
-│       │   ├── grinding_stats.py    # 搬砖统计业务逻辑
-│       │   ├── storage_tracking.py # 窝子计时业务逻辑
-│       │   ├── friend_links.py     # 友情链接业务逻辑
-│       │   ├── background.py       # 背景设置业务逻辑
-│       │   └── activity_scheduler.py # GUI 集成封装
-│       ├── gui/                     # CustomTkinter GUI 界面
-│       │   ├── __init__.py
-│       │   ├── activity_frame.py    # 活动统计主界面
-│       │   └── desktop_reminder.py  # 桌面悬浮气泡提醒
-│       └── main.py                  # GUI 应用入口
+│       ├── core/                     # CustomTkinter GUI 业务逻辑层
+│       ├── gui/                       # CustomTkinter GUI 界面
+│       └── main.py                    # CustomTkinter GUI 入口
+├── qt/                               # PySide6 新版 GUI
+│   ├── main.py                       # 程序入口
+│   ├── requirements.txt              # PySide6 依赖
+│   └── src/
+│       ├── core/                     # 数据模型（复用核心逻辑）
+│       │   └── models.py              # 所有数据类定义
+│       ├── data/                     # 持久化层（复用逻辑）
+│       │   └── persistence.py         # JSON 持久化，加密存储
+│       └── gui/                       # PySide6 GUI 界面
+│           ├── activity_frame.py      # 活动统计主界面
+│           ├── statistics_frame.py   # 数据分析图表
+│           ├── storage_frame.py      # 存储时长统计
+│           ├── bait_frame.py         # 饵料库存统计
+│           ├── lottery_frame.py      # 转盘抽奖
+│           ├── credentials_frame.py  # 加密账号管理
+│           ├── desktop_reminder.py   # 桌面悬浮气泡提醒
+│           ├── main_window.py         # 主窗口
+│           └── dialogs/              # 备份/链接对话框
 ├── src/
 │   └── activity_scheduler/             # 核心调度包（可独立使用）
 │       ├── __init__.py
@@ -64,40 +83,30 @@ RussianFishing4DataGovernance/
 │       ├── data_loader.py            # CSV/JSON 数据加载
 │       └── optimizer.py              # 优化算法实现
 ├── tests/                           # 单元测试（TDD 流程）
-│   ├── __init__.py
-│   ├── conftest.py
-│   ├── test_data_persistence.py
-│   ├── test_lucky_draw.py
-│   ├── test_grinding_stats.py
-│   ├── ... (所有模块都有对应测试)
-│   └── test_activity_scheduler.py
-├── build.spec                        # PyInstaller 打包 spec
-├── requirements.txt                  # pip 依赖列表
-├── pyproject.toml                    # Poetry 配置
 ├── CLAUDE.md                         # 开发指引
+├── requirements.txt                  # pip 依赖列表
+├── pyproject.toml                    # 项目配置
 └── README.md                         # 本文档
 ```
 
-## 各文件具体作用
-
-| 层级 | 文件 | 作用 |
-|------|------|------|
-| **activity_scheduler** | `api.py` | 公开 `ActivityScheduler` API，支持**添加/删除活动**，**更新配置**，**获取推荐**，**启动文件自动监听** |
-| **activity_scheduler** | `types.py` | 定义所有核心数据类：`Activity`, `ActivityType`, `UserConfig`, `ScheduleItem`, `ScheduleResult`, `OptimizationResults` |
-| **activity_scheduler** | `exceptions.py` | 自定义异常：`NoValidScheduleError`, `InvalidActivityError` 等 |
-| **activity_scheduler** | `data_loader.py` | 从 CSV/JSON 加载并验证数据，检查格式错误 |
-| **activity_scheduler** | `optimizer.py` | 实现两种贪心优化算法：`_optimize_for_max_gain()` 最大收益，`_optimize_for_balanced()` 均衡 |
-| **core** | `data_manager.py` | 集中管理所有 JSON 数据持久化，**自动创建备份**，保证数据安全 |
-| **core** | `lucky_draw.py` | 转盘抽奖业务逻辑，概率归一化，奖品管理 |
-| **core** | `grinding_stats.py` | 多角色每日银币/时长统计，进度百分比计算 |
-| **core** | `storage_tracking.py` | 多钓鱼点时间追踪，支持增减时间 |
-| **core** | `friend_links.py` | 好友链接增删改，URL 有效性验证 |
-| **core** | `background.py` | 背景图片路径透明度存储 |
-| **gui** | `activity_frame.py` | 主界面活动统计，包含标签/进度条/表格/对话框 |
-| **gui** | `desktop_reminder.py` | **桌面悬浮提醒窗口** - 圆形占位（未来替换 Live2D），气泡尖端平滑连接圆形，固定距离紧贴模型，定时提醒，右键菜单配置 |
-| **main** | `main.py` | GUI 主入口，创建主窗口，整合所有功能 |
-
 ## 运行方式
+
+### 运行 PySide6 版本 (推荐)
+
+```bash
+cd qt
+pip install -r requirements.txt
+python main.py
+```
+
+数据默认保存在 `~/.rf4_data_process/` 目录（用户目录下），首次运行自动创建，默认是空数据，用户从头开始添加。
+
+### 运行 CustomTkinter 版本
+
+```bash
+pip install -r requirements.txt
+python main/src/main.py
+```
 
 ### 核心调度单独使用
 
@@ -113,20 +122,23 @@ for item in results.maximum_gain.schedule:
     print(f"  {item.activity.activity_name} - {item.end_time - item.start_time} min")
 ```
 
-### 运行完整 GUI 应用
+### 打包 PySide6 版本为 exe
+
+在项目根目录：
 
 ```bash
-pip install -r requirements.txt
-python main/src/main.py
+cd qt
+pyinstaller rf4_data_process.spec
 ```
 
-### 打包单文件 exe
+输出在 `qt/dist/` 文件夹，得到单文件可执行程序，可复制到没有 Python 的 Windows 机器直接运行。
 
-```bash
-pyinstaller build.spec
-```
+## 数据存储安全
 
-输出在 `dist/` 文件夹，得到单文件 `RF4DataTracker.exe`，可复制到没有 Python 的 Windows 机器直接运行。
+- **账号密码加密存储**: 使用 **Fernet 对称加密** 标准安全算法
+- 加密密钥单独存储，密码本身存储为密文
+- 只有点击"复制密码"才临时解密并直接复制到剪贴板，GUI 不显示明文
+- 即使数据文件被他人获取，没有密钥文件也无法解密密码
 
 ## 算法原理
 
@@ -149,14 +161,26 @@ pyinstaller build.spec
 
 ## 桌面悬浮提醒特性
 
-`desktop_reminder.py` 最近重构优化：
+`desktop_reminder.py` 特性：
 
 ✅ **气泡尖端紧贴模型** - 无论气泡内容多少，尖端始终保持固定距离紧贴圆形模型
-✅ **气泡尖端平滑融合** - 尖端和气泡框同色，没有突兀边界
-✅ **点击任意位置关闭** - 点击气泡任何位置都能关闭
-✅ **不显示在任务栏** - 使用 Windows API `WS_EX_TOOLWINDOW` + `~WS_EX_APPWINDOW`，只在主程序图标显示，不单独占用位置
+✅ **不抢游戏焦点** - 使用 Windows API 设置 `WS_EX_NOACTIVATE`，点击不抢夺游戏焦点，仍可正常拖动
+✅ **不显示在任务栏** - 使用 Windows API，只在主程序图标显示，不单独占用位置
+✅ **每日定时提醒** - 零点提醒开加班机，六点提醒开播，饭点提醒吃饭，每两小时提醒休息
+✅ **自定义提醒** - 支持添加自定义 N 分钟后提醒
+✅ **随机鼓励语** - 随机弹出鼓励话语，保持好心情
 ✅ **参数全可配置** - 所有尺寸都提取为类属性，未来替换不同大小模型只需修改几个常数
 
 ## 开发
 
 遵循 **测试驱动开发 (TDD)**: 先写测试，再写实现，保证所有功能都有覆盖。
+
+运行测试：
+
+```bash
+python -m pytest tests/ -v
+```
+
+## 许可证
+
+MIT License
