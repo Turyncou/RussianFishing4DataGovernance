@@ -8,11 +8,11 @@ from PySide6.QtWidgets import (
     QMessageBox, QSizePolicy
 )
 from PySide6.QtCore import Qt, QTimer, QSize, Signal
-from PySide6.QtGui import QIcon, QFont
+from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QPixmap
 
 from src.data.persistence import (
     LotteryPersistence, ActivityPersistence, StoragePersistence, BaitPersistence,
-    FriendLinkPersistence, CredentialsPersistence,
+    FriendLinkPersistence, CredentialsPersistence, AppSettingsPersistence,
     create_auto_backup, list_backups
 )
 from src.core.models import FriendLink
@@ -96,7 +96,13 @@ class MainWindow(QMainWindow):
         self.bait_persistence = None
         self.friend_link_persistence = None
         self.credentials_persistence = None
+        self.app_settings_persistence = None
         self.backup_dir = None
+
+        # Background image settings
+        self._background_image_path = None
+        self._background_opacity = 0.15
+        self._background_label = None
 
         # Window setup
         self.setWindowTitle("RF4 Data Process")
@@ -285,6 +291,12 @@ class MainWindow(QMainWindow):
             self.bait_persistence = BaitPersistence(os.path.join(self.data_dir, 'bait.json'))
             self.friend_link_persistence = FriendLinkPersistence(os.path.join(self.data_dir, 'friend_links.json'))
             self.credentials_persistence = CredentialsPersistence(os.path.join(self.data_dir, 'credentials.json'))
+            self.app_settings_persistence = AppSettingsPersistence(os.path.join(self.data_dir, 'app_settings.json'))
+
+            # Load app settings including background
+            settings = self.app_settings_persistence.load_settings()
+            self._background_image_path = settings.get('background_image_path')
+            self._background_opacity = settings.get('background_opacity', 0.15)
 
             # Create automatic backup on startup
             self.backup_dir = os.path.join(self.data_dir, 'backups')
@@ -349,13 +361,24 @@ class MainWindow(QMainWindow):
 
         nav_layout.addStretch()
 
+        # Background settings button
+        bg_btn = QPushButton("🖼️ 背景")
+        bg_btn.setFixedWidth(80)
+        bg_btn.clicked.connect(self.open_background_settings)
+        nav_layout.addWidget(bg_btn)
+
         main_layout.addWidget(self.nav_bar)
+
+        # Add background image label that covers the entire central widget
+        if self._background_image_path and os.path.exists(self._background_image_path):
+            self._update_background()
 
         # Content area - scrollable
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.NoFrame)
         self.content_container = QWidget()
+        self.content_container.setAutoFillBackground(False)
         self.content_layout = QVBoxLayout(self.content_container)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_area.setWidget(self.content_container)
@@ -392,6 +415,8 @@ class MainWindow(QMainWindow):
         home_widget = QWidget()
         home_layout = QVBoxLayout(home_widget)
         home_layout.setContentsMargins(0, 0, 0, 0)
+        # Make home widget background transparent so main background shows through
+        home_widget.setAutoFillBackground(False)
 
         # Welcome label
         welcome = QLabel("欢迎使用 RF4 数据统计工具")
@@ -608,3 +633,70 @@ class MainWindow(QMainWindow):
         if "bait" in self._frame_cache:
             self._frame_cache["bait"].save_data()
         event.accept()
+
+    def open_background_settings(self):
+        """Open background settings dialog"""
+        from .dialogs.background_settings_dialog import BackgroundSettingsDialog
+        dialog = BackgroundSettingsDialog(self, self._background_image_path, self._background_opacity)
+        dialog.settings_changed.connect(self._on_background_settings_changed)
+        dialog.exec()
+
+    def _on_background_settings_changed(self, image_path: str, opacity: float):
+        """Callback when background settings are changed"""
+        self._background_image_path = image_path
+        self._background_opacity = opacity
+
+        # Save settings
+        if self.app_settings_persistence:
+            self.app_settings_persistence.save_settings(self._background_image_path, self._background_opacity)
+
+        # Update background display
+        self._update_background()
+
+    def _update_background(self):
+        """Update the background image display"""
+        # Remove old background label if exists
+        if self._background_label is not None:
+            self.central_widget.layout().removeWidget(self._background_label)
+            self._background_label.deleteLater()
+            self._background_label = None
+
+        if not self._background_image_path or not os.path.exists(self._background_image_path):
+            # No background, use default dark background
+            return
+
+        # Create new background label that covers the entire central widget
+        self._background_label = QLabel(self.central_widget)
+        pixmap = QPixmap(self._background_image_path)
+        if not pixmap.isNull():
+            # Scale pixmap to fit window
+            scaled_pixmap = pixmap.scaled(
+                self.central_widget.size(),
+                Qt.KeepAspectRatioByExpanding,
+                Qt.SmoothTransformation
+            )
+            # Apply opacity
+            palette = QPalette()
+            brush = QBrush(scaled_pixmap)
+            palette.setBrush(QPalette.Window, brush)
+            self._background_label.setPalette(palette)
+            # Make background transparent enough to not block content
+            self._background_label.setWindowOpacity(self._background_opacity)
+            self._background_label.setAutoFillBackground(True)
+            self._background_label.resize(self.central_widget.size())
+            # Background goes below all other content
+            self._background_label.lower()
+            self._background_label.show()
+
+        # Also update background for home page content container
+        if self.current_widget:
+            # Make the content container background transparent
+            # so the main background shows through
+            self.current_widget.setAutoFillBackground(False)
+            self.content_container.setAutoFillBackground(False)
+
+    def resizeEvent(self, event):
+        """Handle window resize to update background scaling"""
+        super().resizeEvent(event)
+        if self._background_label and self._background_image_path:
+            self._update_background()

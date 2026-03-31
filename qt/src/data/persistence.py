@@ -511,6 +511,41 @@ class BaitPersistence(DataPersistence):
             return []
 
 
+class AppSettingsPersistence(DataPersistence):
+    """Persistence for application settings like background image"""
+
+    def __init__(self, file_path: str):
+        super().__init__(file_path)
+
+    def save_settings(self, background_image_path: str = None, background_opacity: float = 0.15) -> None:
+        """Save application settings"""
+        data = {
+            'background_image_path': background_image_path if background_image_path else None,
+            'background_opacity': background_opacity,
+        }
+        self.save(data)
+
+    def load_settings(self) -> dict:
+        """Load application settings, returns dict with defaults if not found"""
+        data = self.load()
+        if not data:
+            return {
+                'background_image_path': None,
+                'background_opacity': 0.15,
+            }
+
+        try:
+            return {
+                'background_image_path': data.get('background_image_path', None),
+                'background_opacity': float(data.get('background_opacity', 0.15)),
+            }
+        except (KeyError, ValueError):
+            return {
+                'background_image_path': None,
+                'background_opacity': 0.15,
+            }
+
+
 def create_auto_backup(source_dir: str, backup_dir: str) -> str:
     """Create automatic backup of all JSON data files
 
