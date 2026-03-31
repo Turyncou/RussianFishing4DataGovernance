@@ -146,7 +146,8 @@ class StatisticsFrame(ctk.CTkFrame):
 
     def load_data_and_plot(self):
         """Load data from persistence and create plots with animation"""
-        characters, _ = self.activity_persistence.load_characters()
+        # Load ALL records for statistics analysis (not just today)
+        characters, _ = self.activity_persistence.load_all_characters()
 
         if not characters:
             # No data available
@@ -183,7 +184,7 @@ class StatisticsFrame(ctk.CTkFrame):
         for char in characters:
             total_grinding = 0
             for record in char.records:
-                if record.activity_type == char.grinding_goal.activity_type if char.grinding_goal else None:
+                if char.grinding_goal and record.activity_type == char.grinding_goal.activity_type:
                     total_grinding += record.silver_count
             if char.grinding_goal:
                 char_totals.append(char.grinding_goal.total_income - char.get_remaining_income())
@@ -249,7 +250,8 @@ class StatisticsFrame(ctk.CTkFrame):
             animate_daily,
             frames=len(self.final_x) + 10,
             interval=30,
-            repeat=False
+            repeat=False,
+            blit=False
         )
 
         self.canvas_daily.draw()
@@ -295,7 +297,8 @@ class StatisticsFrame(ctk.CTkFrame):
             animate_char,
             frames=50,
             interval=20,
-            repeat=False
+            repeat=False,
+            blit=False
         )
 
         self.canvas_char.draw()
@@ -348,7 +351,8 @@ class StatisticsFrame(ctk.CTkFrame):
             animate_pie,
             frames=100,
             interval=10,
-            repeat=False
+            repeat=False,
+            blit=False
         )
 
         self.canvas_pie.draw()
@@ -369,12 +373,15 @@ class StatisticsFrame(ctk.CTkFrame):
 
     def refresh_plots(self):
         """Refresh data and replay all animations"""
-        # Stop existing animations
-        for anim in [getattr(self, 'animation_daily', None),
-                    getattr(self, 'animation_char', None),
-                    getattr(self, 'animation_pie', None)]:
+        # Stop existing animations to prevent memory leaks
+        for anim_name in ['animation_daily', 'animation_char', 'animation_pie']:
+            anim = getattr(self, anim_name, None)
             if anim is not None:
-                anim.event_source.stop()
+                try:
+                    anim.event_source.stop()
+                except:
+                    pass
+                delattr(self, anim_name)
 
         self.load_data_and_plot()
 

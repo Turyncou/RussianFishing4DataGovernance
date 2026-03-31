@@ -6,7 +6,7 @@ import shutil
 from datetime import datetime, date
 from typing import Any, List
 from cryptography.fernet import Fernet
-from core.models import (
+from src.core.models import (
     LotteryPrize, ActivityRecord, ActivityCharacter, ActivityGoal, ActivityType,
     StorageCharacter, FriendLink, SuggestionUserSettings,
     AccountCredential, BaitConsumption
