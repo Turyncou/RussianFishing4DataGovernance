@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, QSize, Signal
 from PySide6.QtGui import QIcon, QFont
-from PySide6.QtCharts import *
 
 from src.data.persistence import (
     LotteryPersistence, ActivityPersistence, StoragePersistence, BaitPersistence,

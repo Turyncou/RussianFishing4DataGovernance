@@ -8,7 +8,9 @@
       "Bash(findstr /v \"__pycache__\")",
       "Bash(findstr /v \".git\")",
       "Bash(dir:*)",
-      "Bash(C:\\\\Users\\\\turyn\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe example_usage.py)"
+      "Bash(C:\\\\Users\\\\turyn\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe example_usage.py)",
+      "Bash(pip show:*)",
+      "WebSearch"
     ]
   }
 }

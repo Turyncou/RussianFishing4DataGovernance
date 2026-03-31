@@ -147,6 +147,10 @@ class DesktopReminder(QMainWindow):
             "meal": False,
         }
 
+        # Bubble animation timer
+        self._bubble_timer: Optional[QTimer] = None
+        self._bubble_anim_phase = 0
+
         # Mouse dragging state
         self._drag_start_pos: Optional[QPoint] = None
         self._window_start_pos: Optional[QPoint] = None
@@ -203,6 +207,13 @@ class DesktopReminder(QMainWindow):
 
     def show_bubble(self, message: str, has_button: bool = False, button_text: str = "知道了"):
         """Show speech bubble with message"""
+        # Ensure any existing animation is completely stopped before creating new bubble
+        if self._bubble_timer is not None:
+            self._bubble_timer.stop()
+            self._bubble_timer.timeout.disconnect()
+            self._bubble_timer.deleteLater()
+            self._bubble_timer = None
+
         self.close_bubble()
 
         self.bubble_visible = True
@@ -235,13 +246,24 @@ class DesktopReminder(QMainWindow):
 
     def _start_bubble_animation(self):
         """Start floating animation for bubble"""
-        self._bubble_anim_running = True
+        # Stop any existing animation completely before starting new one
+        if self._bubble_timer is not None:
+            self._bubble_timer.stop()
+            try:
+                self._bubble_timer.timeout.disconnect(self._animate_bubble)
+            except (TypeError, RuntimeError):
+                pass  # Already disconnected
+            self._bubble_timer.deleteLater()
+            self._bubble_timer = None
+
         self._bubble_anim_phase = 0
-        self._animate_bubble()
+        self._bubble_timer = QTimer(self)
+        self._bubble_timer.timeout.connect(self._animate_bubble)
+        self._bubble_timer.start(16)  # 60 FPS = 16ms per frame
 
     def _animate_bubble(self):
         """Animate bubble floating"""
-        if not self._bubble_anim_running or self.bubble_window is None:
+        if self.bubble_window is None or self._bubble_timer is None:
             return
 
         # Calculate base position
@@ -260,7 +282,6 @@ class DesktopReminder(QMainWindow):
         # Floating animation
         amplitude = 6
         speed = 0.15
-        import math
         offset = math.sin(self._bubble_anim_phase) * amplitude
         self._bubble_anim_phase += speed
 
@@ -279,17 +300,25 @@ class DesktopReminder(QMainWindow):
                 final_y = 0
 
         self.bubble_window.move(final_x, final_y)
-        QTimer.singleShot(16, self._animate_bubble)
 
     def close_bubble(self):
         """Close the speech bubble"""
+        # Stop animation timer completely
+        if self._bubble_timer is not None:
+            self._bubble_timer.stop()
+            try:
+                self._bubble_timer.timeout.disconnect(self._animate_bubble)
+            except (TypeError, RuntimeError):
+                pass  # Already disconnected
+            self._bubble_timer.deleteLater()
+            self._bubble_timer = None
+
         if self.bubble_visible and self.bubble_window is not None:
             self.bubble_visible = False
             self.bubble_message = ""
             self.reminder_shown = False
             self.bubble_window.close()
             self.bubble_window = None
-        self._bubble_anim_running = False
 
     def _update_bubble_position(self):
         """Update bubble position to follow main window"""

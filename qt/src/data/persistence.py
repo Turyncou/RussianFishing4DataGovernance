@@ -8,7 +8,7 @@ from typing import Any, List
 from cryptography.fernet import Fernet
 from src.core.models import (
     LotteryPrize, ActivityRecord, ActivityCharacter, ActivityGoal, ActivityType,
-    StorageCharacter, FriendLink, SuggestionUserSettings,
+    StorageCharacter, FriendLink, SuggestionUserSettings, OptimizationAlgorithm,
     AccountCredential, BaitConsumption
 )
 
@@ -99,12 +99,21 @@ class ActivityPersistence(DataPersistence):
         today = date.today()
         data = {
             'version': 2,
-            'global_suggestion_settings': {
-                'daily_total_hours': global_suggestion_settings.daily_total_hours,
-                'grinding_concurrent': global_suggestion_settings.grinding_concurrent,
-                'star_waiting_concurrent': global_suggestion_settings.star_waiting_concurrent,
-                'switch_minutes': global_suggestion_settings.switch_minutes
-            } if global_suggestion_settings else None,
+            'global_suggestion_settings': (
+                {
+                    'daily_total_hours': global_suggestion_settings.daily_total_hours,
+                    'grinding_concurrent': global_suggestion_settings.grinding_concurrent,
+                    'star_waiting_concurrent': global_suggestion_settings.star_waiting_concurrent,
+                    'switch_minutes': global_suggestion_settings.switch_minutes,
+                    'algorithm': (
+                        global_suggestion_settings.algorithm.value
+                        if isinstance(global_suggestion_settings.algorithm, OptimizationAlgorithm)
+                        else OptimizationAlgorithm.BALANCED.value
+                    )
+                }
+                if global_suggestion_settings
+                else None
+            ),
             'characters': []
         }
         for char in characters:
@@ -167,11 +176,19 @@ class ActivityPersistence(DataPersistence):
                 global_settings_data = data.get('global_suggestion_settings')
                 global_settings = None
                 if global_settings_data:
+                    # Load algorithm with backward compatibility
+                    algorithm_val = global_settings_data.get('algorithm', OptimizationAlgorithm.BALANCED.value)
+                    try:
+                        algorithm = OptimizationAlgorithm(algorithm_val)
+                    except ValueError:
+                        algorithm = OptimizationAlgorithm.BALANCED
+
                     global_settings = SuggestionUserSettings(
                         daily_total_hours=global_settings_data.get('daily_total_hours', 8.0),
                         grinding_concurrent=global_settings_data.get('grinding_concurrent', 1),
                         star_waiting_concurrent=global_settings_data.get('star_waiting_concurrent', 1),
-                        switch_minutes=global_settings_data.get('switch_minutes', 20)
+                        switch_minutes=global_settings_data.get('switch_minutes', 20),
+                        algorithm=algorithm
                     )
             else:
                 # Version 1 format - old format is just list of characters
@@ -205,11 +222,19 @@ class ActivityPersistence(DataPersistence):
                 # Load suggestion settings
                 settings_data = item.get('suggestion_settings')
                 if settings_data:
+                    # Load algorithm with backward compatibility
+                    algorithm_val = settings_data.get('algorithm', OptimizationAlgorithm.BALANCED.value)
+                    try:
+                        algorithm = OptimizationAlgorithm(algorithm_val)
+                    except ValueError:
+                        algorithm = OptimizationAlgorithm.BALANCED
+
                     char.suggestion_settings = SuggestionUserSettings(
                         daily_total_hours=settings_data.get('daily_total_hours', 8.0),
                         grinding_concurrent=settings_data.get('grinding_concurrent', 1),
                         star_waiting_concurrent=settings_data.get('star_waiting_concurrent', 1),
-                        switch_minutes=settings_data.get('switch_minutes', 20)
+                        switch_minutes=settings_data.get('switch_minutes', 20),
+                        algorithm=algorithm
                     )
 
                 # Load records - only today or all
@@ -230,6 +255,67 @@ class ActivityPersistence(DataPersistence):
             return characters, global_settings
         except (KeyError, ValueError):
             return [], None
+
+    def export_to_csv(self, characters: List[ActivityCharacter], file_path: str) -> None:
+        """Export all activity records to CSV file"""
+        import csv
+        with open(file_path, 'w', encoding='utf-8-sig', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['角色名称', '日期', '活动类型', '银币/成功数量', '时长(分钟)'])
+            for char in characters:
+                for record in char.records:
+                    activity_type = '搬砖' if record.activity_type == ActivityType.GRINDING else '蹲星'
+                    value = record.silver_count if record.activity_type == ActivityType.GRINDING else record.success_count
+                    writer.writerow([char.name, record.date.strftime('%Y-%m-%d'), activity_type, value, record.duration_minutes])
+
+    def import_from_csv(self, file_path: str) -> List[ActivityCharacter]:
+        """Import activity records from CSV file
+        Expected CSV format: 角色名称,日期,活动类型,银币/成功数量,时长(分钟)
+        Returns list of ActivityCharacter with imported records
+        """
+        import csv
+        characters_map: dict[str, ActivityCharacter] = {}
+        with open(file_path, 'r', encoding='utf-8-sig') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header
+            for row in reader:
+                if len(row) < 5:
+                    continue
+                char_name = row[0].strip()
+                date_str = row[1].strip()
+                activity_type_str = row[2].strip()
+                value_str = row[3].strip()
+                duration_str = row[4].strip()
+
+                try:
+                    record_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    value = int(float(value_str.replace(',', '')))
+                    duration = int(float(duration_str))
+
+                    if activity_type_str in ['搬砖', 'grinding', 'GRINDING']:
+                        activity_type = ActivityType.GRINDING
+                        silver_count = value
+                        success_count = 0
+                    else:
+                        activity_type = ActivityType.STAR_WAITING
+                        silver_count = 0
+                        success_count = value
+
+                    if char_name not in characters_map:
+                        characters_map[char_name] = ActivityCharacter(char_name)
+                    char = characters_map[char_name]
+                    record = ActivityRecord(
+                        date=record_date,
+                        activity_type=activity_type,
+                        silver_count=silver_count,
+                        success_count=success_count,
+                        duration_minutes=duration
+                    )
+                    char.add_record(record)
+                except (ValueError, IndexError):
+                    continue  # Skip invalid rows
+
+        return list(characters_map.values())
 
 
 class StoragePersistence(DataPersistence):

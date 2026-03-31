@@ -26,31 +26,9 @@ def calculate_suggestion_for_all(characters: list[ActivityCharacter], global_set
     # Calculate available time after accounting for switching
     total_available_minutes = settings.daily_total_hours * 60
 
-    # Only subtract switching time if we actually need to switch activities on the same character
-    # If both grinding and star waiting are done on different characters at the same time,
-    # no switching is needed - so don't subtract anything!
-    # We need switching only when a single character does both activities in one day.
-    # But in general optimal allocation, we won't do that - each character does one activity.
-    # So only subtract switching when we have both activities AND some character needs both.
-    # For backward compatibility, we keep the original behavior: if has_both → subtract once.
-    # The user explained: switching time is for switching between different characters when one goes offline.
-    # If you have fixed number of concurrent slots = grinding_concurrent + star_waiting_concurrent,
-    # you don't need to switch at all - each character stays in its activity all day.
-    # So no switching time needed when concurrent slots are fully used by fixed assignments.
-    # Only subtract switching if you actually need to switch during the day.
-    # User's use case: 1 grinding + 1 star waiting on two different characters → no switch needed.
-    # So we DON'T subtract any switching time in this case!
-    #
-    # The correct rule: only need switching if total active characters > total concurrent slots.
-    # Because that means you need to rotate (switch) characters during the day.
-    # If total active characters <= total concurrent slots → no switching needed, everyone stays online.
-    #
-    total_active_chars = len([c for c in characters if c.grinding_goal or c.star_waiting_goal])
-    total_concurrent_slots = settings.grinding_concurrent + settings.star_waiting_concurrent
+    # If we have both activities, we need to account for one switch if both are done
     has_both = remaining['total_grinding_remaining_value'] > 0 and remaining['total_star_remaining_value'] > 0
-    need_switching = total_active_chars > total_concurrent_slots
-    if need_switching:
-        # Assume one switching per day average
+    if has_both:
         total_available_minutes -= settings.switch_minutes
 
     # Calculate how much we can do per day considering concurrency
@@ -120,37 +98,16 @@ def calculate_suggestion_for_all(characters: list[ActivityCharacter], global_set
         total_remaining_minutes = remaining['total_grinding_remaining_duration'] + remaining['total_star_remaining_duration']
         # Proportional allocation within capacity, but respect max per-activity concurrency
         grinding_daily = (remaining['total_grinding_remaining_duration'] / total_remaining_minutes) * total_daily_capacity
-        star_daily = (remaining['total_star_remaining_duration'] / total_remaining_minutes) * total_daily_capacity
-
-        # Cannot exceed maximum concurrent slots for either activity
-        # If one hits max, the other gets all remaining capacity
-        grinding_was_truncated = False
-        star_was_truncated = False
-
+        # Cannot exceed maximum concurrent slots for this activity type
         grinding_daily = min(grinding_daily, max_grinding_total)
         grinding_daily = max(0, grinding_daily)
-        if grinding_daily < (remaining['total_grinding_remaining_duration'] / total_remaining_minutes) * total_daily_capacity - 1e-9:
-            grinding_was_truncated = True
-
-        star_daily = min(star_daily, max_star_total)
-        star_daily = max(0, star_daily)
-        if star_daily < (remaining['total_star_remaining_duration'] / total_remaining_minutes) * total_daily_capacity - 1e-9:
-            star_was_truncated = True
-
-        # If either hit max capacity, allocate remaining capacity to the other
-        if grinding_was_truncated and not star_was_truncated:
-            # Grinding hit max, give all remaining capacity to star
-            remaining_capacity = max(0, total_daily_capacity - grinding_daily)
-            star_daily = min(remaining['total_star_remaining_duration'], remaining_capacity, max_star_total)
-        elif star_was_truncated and not grinding_was_truncated:
-            # Star hit max, give all remaining capacity to grinding
-            remaining_capacity = max(0, total_daily_capacity - star_daily)
-            grinding_daily = min(remaining['total_grinding_remaining_duration'], remaining_capacity, max_grinding_total)
-        # If both hit max or neither hit, keep original allocation
-        # Both can only hit max when sum of max already <= total_daily_capacity, so it's fine
-
-        # Final clamping
-        grinding_daily = max(0, grinding_daily)
+        # Remaining capacity goes to star waiting
+        remaining_capacity = max(0, total_daily_capacity - grinding_daily)
+        star_daily = min(
+            (remaining['total_star_remaining_duration'] / total_remaining_minutes) * total_daily_capacity,
+            remaining_capacity,
+            max_star_total
+        )
         star_daily = max(0, star_daily)
     elif remaining['total_grinding_remaining_value'] > 0:
         # Only grinding, use all grinding concurrent slots (capped by actual characters)

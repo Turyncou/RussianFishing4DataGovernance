@@ -62,6 +62,12 @@ class ActivityGoal:
             raise ValueError("Total income cannot be negative")
 
 
+class OptimizationAlgorithm(str, Enum):
+    """Optimization algorithm selection"""
+    BALANCED = "balanced"  # 均衡完成 - 按比例分配，所有目标尽量同时完成（总收入最大化，尽早拿完所有收入）
+    DAILY_INCOME = "daily_income"  # 当日收入最大化 - 优先分配给单位时间收入更高的活动
+
+
 @dataclass
 class SuggestionUserSettings:
     """User settings for activity suggestion"""
@@ -69,6 +75,7 @@ class SuggestionUserSettings:
     grinding_concurrent: int = 1  # How many grinding activities can be done concurrently
     star_waiting_concurrent: int = 1  # How many star waiting activities can be done concurrently
     switch_minutes: int = 20  # Time needed to switch between activities in minutes
+    algorithm: OptimizationAlgorithm = OptimizationAlgorithm.BALANCED  # Optimization algorithm
 
 
 @dataclass

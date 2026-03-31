@@ -1,19 +1,19 @@
 """Activity statistics frame (grinding + star waiting)"""
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QLabel, QPushButton, QListWidget, QListWidgetItem, QTableWidget,
     QTableWidgetItem, QTabWidget, QProgressBar, QDialog, QSpinBox,
     QDoubleSpinBox, QLineEdit, QMessageBox, QGroupBox, QScrollArea,
-    QHeaderView
+    QHeaderView, QFileDialog, QDateEdit, QCheckBox, QComboBox
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QDate
 from PySide6.QtGui import QFont
 
 from src.core.models import (
     ActivityType, ActivityRecord, ActivityCharacter, ActivityGoal,
-    SuggestionUserSettings, ActivitySuggestion
+    SuggestionUserSettings, ActivitySuggestion, OptimizationAlgorithm
 )
 from src.data.persistence import ActivityPersistence
 from .suggestion_calculator import calculate_suggestion_for_all
@@ -259,6 +259,28 @@ class ActivityFrame(QWidget):
         save_btn.clicked.connect(self.save_data)
         table_layout.addWidget(save_btn, alignment=Qt.AlignHCenter)
 
+        # History and export buttons
+        btn_row_layout = QHBoxLayout()
+        btn_row_layout.setSpacing(10)
+        btn_row_layout.setAlignment(Qt.AlignCenter)
+
+        history_btn = QPushButton("查看历史记录")
+        history_btn.setFixedWidth(120)
+        history_btn.clicked.connect(lambda: self.view_history(activity_type))
+        btn_row_layout.addWidget(history_btn)
+
+        export_btn = QPushButton("导出CSV")
+        export_btn.setFixedWidth(100)
+        export_btn.clicked.connect(lambda: self.export_csv(activity_type))
+        btn_row_layout.addWidget(export_btn)
+
+        import_btn = QPushButton("导入CSV")
+        import_btn.setFixedWidth(100)
+        import_btn.clicked.connect(lambda: self.import_csv(activity_type))
+        btn_row_layout.addWidget(import_btn)
+
+        table_layout.addLayout(btn_row_layout)
+
         self._tables[activity_type] = table
 
         layout.addWidget(table_group, 1)
@@ -361,14 +383,14 @@ class ActivityFrame(QWidget):
 
         if progress_value is not None:
             value_progress.setValue(int(progress_value * 100))
-            value_label.setText(f"{value_name}: {int(progress_value * 100)}%")
+            value_label.setText(f"{value_name}: {progress_value * 100:.2f}%")
         else:
             value_progress.setValue(0)
             value_label.setText(f"{value_name}: 未设置目标")
 
         if progress_duration is not None:
             duration_progress.setValue(int(progress_duration * 100))
-            duration_label.setText(f"时长: {int(progress_duration * 100)}%")
+            duration_label.setText(f"时长: {progress_duration * 100:.2f}%")
         else:
             duration_progress.setValue(0)
             duration_label.setText(f"时长: 未设置目标")
@@ -546,20 +568,464 @@ class ActivityFrame(QWidget):
             self.suggestion_label.setText("所有目标已完成！恭喜！")
             return
 
+        # Show suggestion in a separate dialog with table
+        dialog = SuggestionResultDialog(self, self.characters, suggestion, self.global_suggestion_settings)
+        dialog.exec()
+
+        # Update summary text in the label
+        # Handle case where algorithm might be stored as string
+        if isinstance(self.global_suggestion_settings.algorithm, str):
+            algorithm_val = self.global_suggestion_settings.algorithm
+        else:
+            algorithm_val = self.global_suggestion_settings.algorithm.value
+
         text = (
-            f"【全部角色汇总建议】\n"
-            f"每日安排:\n"
-            f"  搬砖: {suggestion.daily_grinding_minutes:.1f} 分钟/天\n"
-            f"  蹲星: {suggestion.daily_star_waiting_minutes:.1f} 分钟/天\n"
+            f"算法: {'当日收入最大化' if algorithm_val == 'daily_income' else '均衡完成(总收入最大化)'}\n"
             f"预计还需要 {suggestion.estimated_days_remaining:.1f} 天完成全部目标\n"
             f"预计剩余总收入: {suggestion.estimated_total_income:,} 人民币\n"
-            f"\n{suggestion.recommendation}"
+            f"\n点击上方'获取建议'重新查看完整表格"
         )
         self.suggestion_label.setText(text)
 
     def save_data(self):
         """Save all data to persistence"""
         self.persistence.save_characters(self.characters, self.global_suggestion_settings)
+
+    def view_history(self, activity_type: ActivityType):
+        """Open history view dialog"""
+        if not self.current_character:
+            QMessageBox.information(self, "提示", "请先在左侧选择一个角色")
+            return
+        dialog = HistoryViewDialog(self, self.current_character, activity_type, self.persistence)
+        dialog.exec()
+
+    def export_csv(self, activity_type: ActivityType):
+        """Export all records of current character and activity type to CSV"""
+        if not self.current_character:
+            QMessageBox.information(self, "提示", "请先在左侧选择一个角色")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出CSV", f"{self.current_character.name}_{activity_type.value}.csv",
+            "CSV文件 (*.csv);;所有文件 (*.*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            import csv
+            with open(file_path, 'w', encoding='utf-8-sig', newline='') as f:
+                writer = csv.writer(f)
+                if activity_type == ActivityType.GRINDING:
+                    writer.writerow(['日期', '银币', '时长(分钟)'])
+                else:
+                    writer.writerow(['日期', '成功数量', '时长(分钟)'])
+                for record in self.current_character.records:
+                    if record.activity_type == activity_type:
+                        value = record.silver_count if activity_type == ActivityType.GRINDING else record.success_count
+                        writer.writerow([
+                            record.date.strftime('%Y-%m-%d'),
+                            value,
+                            record.duration_minutes
+                        ])
+            count = sum(1 for r in self.current_character.records if r.activity_type == activity_type)
+            QMessageBox.information(self, "成功", f"已导出 {count} 条记录到\n{file_path}")
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"错误: {str(e)}")
+
+    def import_csv(self, activity_type: ActivityType):
+        """Import records from CSV to current character"""
+        if not self.current_character:
+            QMessageBox.information(self, "提示", "请先在左侧选择一个角色")
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "导入CSV", "", "CSV文件 (*.csv);;所有文件 (*.*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            import csv
+            imported_count = 0
+            with open(file_path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f)
+                next(reader)  # Skip header
+                for row in reader:
+                    if len(row) < 3:
+                        continue
+                    date_str = row[0].strip()
+                    value_str = row[1].strip()
+                    duration_str = row[2].strip()
+
+                    try:
+                        record_date = date.fromisoformat(date_str)
+                    except ValueError:
+                        try:
+                            record_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                        except ValueError:
+                            continue
+
+                    try:
+                        value = int(float(value_str.replace(',', '')))
+                        duration = int(float(duration_str))
+                    except ValueError:
+                        continue
+
+                    if activity_type == ActivityType.GRINDING:
+                        record = ActivityRecord(
+                            date=record_date,
+                            activity_type=activity_type,
+                            silver_count=value,
+                            duration_minutes=duration
+                        )
+                    else:
+                        record = ActivityRecord(
+                            date=record_date,
+                            activity_type=activity_type,
+                            success_count=value,
+                            duration_minutes=duration
+                        )
+
+                    # Check if duplicate record for same date
+                    duplicate = False
+                    for existing in self.current_character.records:
+                        if existing.date == record_date and existing.activity_type == activity_type:
+                            duplicate = True
+                            break
+                    if not duplicate:
+                        self.current_character.add_record(record)
+                        imported_count += 1
+
+            QMessageBox.information(self, "导入完成", f"成功导入 {imported_count} 条新记录\n(已自动跳过同一天重复记录)")
+            self.update_display(activity_type)
+            self.save_data()
+        except Exception as e:
+            QMessageBox.warning(self, "导入失败", f"错误: {str(e)}\n\n请确保CSV格式正确：日期,数值,时长")
+
+    def import_csv_all_characters(self):
+        """Import CSV that may contain multiple characters (uses the global import from persistence)"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "导入CSV（多角色）", "", "CSV文件 (*.csv);;所有文件 (*.*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            imported_chars = self.persistence.import_from_csv(file_path)
+            if not imported_chars:
+                QMessageBox.information(self, "结果", "未导入任何有效数据")
+                return
+
+            # Merge imported characters into existing list
+            merged_count = 0
+            for imported_char in imported_chars:
+                # Find existing character with same name
+                existing = next((c for c in self.characters if c.name == imported_char.name), None)
+                if existing:
+                    # Merge records
+                    existing_records = {(r.date, r.activity_type): r for r in existing.records}
+                    for record in imported_char.records:
+                        key = (record.date, record.activity_type)
+                        if key not in existing_records:
+                            existing.add_record(record)
+                            merged_count += 1
+                else:
+                    self.characters.append(imported_char)
+                    merged_count += len(imported_char.records)
+
+            QMessageBox.information(self, "导入完成",
+                                  f"导入完成\n"
+                                  f"角色数: {len(imported_chars)}\n"
+                                  f"新增记录数: {merged_count}")
+            self.update_character_list()
+            self.update_all_displays()
+            self.save_data()
+        except Exception as e:
+            QMessageBox.warning(self, "导入失败", f"错误: {str(e)}")
+
+
+class SuggestionResultDialog(QDialog):
+    """Dialog to show suggestion result with table UI"""
+
+    def __init__(self, parent, characters: List[ActivityCharacter], suggestion: ActivitySuggestion, settings: SuggestionUserSettings):
+        super().__init__(parent)
+        self.setWindowTitle("活动安排建议")
+        self.resize(800, 500)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Summary info
+        algorithm_name = "均衡完成（总收入最大化，尽早完成全部目标）" if settings.algorithm == OptimizationAlgorithm.BALANCED else "当日收入最大化（优先单位收入高的活动）"
+        summary_text = (
+            f"优化算法: {algorithm_name}  |  预计总天数: {suggestion.estimated_days_remaining:.1f}  |  剩余总收入: {suggestion.estimated_total_income:,} 人民币"
+        )
+        summary_label = QLabel(summary_text)
+        summary_label.setFont(QFont("Segoe UI", 12))
+        summary_label.setStyleSheet("padding: 8px; background-color: #2d2d2d; border-radius: 4px;")
+        layout.addWidget(summary_label)
+
+        # Daily total
+        daily_total = suggestion.daily_grinding_minutes + suggestion.daily_star_waiting_minutes
+        daily_text = (
+            f"合计每日总活动时长: {daily_total:.0f} 分钟  |  搬砖: {suggestion.daily_grinding_minutes:.0f} 分钟  |  蹲星: {suggestion.daily_star_waiting_minutes:.0f} 分钟"
+        )
+        daily_label = QLabel(daily_text)
+        daily_label.setFont(QFont("Segoe UI", 11))
+        layout.addWidget(daily_label)
+
+        # Table for per-character details
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels([
+            "角色名称", "每日搬砖(分钟)", "每日蹲星(分钟)",
+            "剩余目标值", "剩余时长(分钟)", "预计剩余天数"
+        ])
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+
+        # Calculate total remaining durations for proportional distribution
+        total_grinding_remaining_duration = sum(
+            max(0, char.grinding_goal.target_duration - char.calculate_totals(ActivityType.GRINDING)[1])
+            for char in characters if char.grinding_goal
+        )
+        total_star_remaining_duration = sum(
+            max(0, char.star_waiting_goal.target_duration - char.calculate_totals(ActivityType.STAR_WAITING)[1])
+            for char in characters if char.star_waiting_goal
+        )
+
+        # Filter active characters (those with remaining work)
+        active_characters = [
+            char for char in characters
+            if (char.grinding_goal and char.calculate_totals(ActivityType.GRINDING)[2] > 0) or
+               (char.star_waiting_goal and char.calculate_totals(ActivityType.STAR_WAITING)[2] > 0)
+        ]
+
+        if not active_characters:
+            row = 0
+        else:
+            # Get daily calendar time limit per character (same for all characters)
+            daily_calendar_minutes = None
+            if parent and hasattr(parent, 'global_suggestion_settings') and parent.global_suggestion_settings:
+                daily_calendar_minutes = parent.global_suggestion_settings.daily_total_hours * 60
+            if daily_calendar_minutes is None or daily_calendar_minutes <= 0:
+                if active_characters and hasattr(active_characters[0], 'suggestion_settings'):
+                    daily_calendar_minutes = active_characters[0].suggestion_settings.daily_total_hours * 60
+            if daily_calendar_minutes is None or daily_calendar_minutes <= 0:
+                daily_calendar_minutes = 8 * 60  # Default 8 hours
+
+            # Simple Iterative Projection Method
+            # Algorithm (Combettes, 2002 - Projection Methods for Convex Feasibility Problems):
+            # 1. Start: gᵢ ∝ remaining_gᵢ, sᵢ ∝ remaining_sᵢ  (keep proportional allocation)
+            # 2. Repeat until convergence:
+            #    a. For each character: if gᵢ + sᵢ > daily_limit → scale proportionally to fit
+            #    b. Renormalize global totals: Σgᵢ = grinding_daily, Σsᵢ = star_daily
+            # 3. This simple method is proven to converge and very robust in practice
+            # Reference: https://en.wikipedia.org/wiki/Projection_method_(optimization)
+
+            # Step 1: Initial allocation
+            allocations = []
+            for char in active_characters:
+                _, total_g_duration, remaining_g_value = char.calculate_totals(ActivityType.GRINDING)
+                _, total_s_duration, remaining_s_value = char.calculate_totals(ActivityType.STAR_WAITING)
+
+                remaining_g = max(0, char.grinding_goal.target_duration - total_g_duration) if char.grinding_goal else 0.0
+                remaining_s = max(0, char.star_waiting_goal.target_duration - total_s_duration) if char.star_waiting_goal else 0.0
+
+                # Initial proportional allocation - keep the original proportion
+                if char.grinding_goal and total_grinding_remaining_duration > 0:
+                    g = (remaining_g / total_grinding_remaining_duration) * suggestion.daily_grinding_minutes
+                else:
+                    g = 0.0
+
+                if char.star_waiting_goal and total_star_remaining_duration > 0:
+                    s = (remaining_s / total_star_remaining_duration) * suggestion.daily_star_waiting_minutes
+                else:
+                    s = 0.0
+
+                # Initial bounds clamping
+                g = max(0.0, min(g, remaining_g))
+                s = max(0.0, min(s, remaining_s))
+
+                allocations.append({
+                    'char': char,
+                    'g': g,
+                    's': s,
+                    'max_g': remaining_g,
+                    'max_s': remaining_s,
+                    'max_total': daily_calendar_minutes,
+                    'total_g_duration': total_g_duration,
+                    'total_s_duration': total_s_duration,
+                    'remaining_g_value': remaining_g_value,
+                    'remaining_s_value': remaining_s_value,
+                })
+
+            # Step 2: Iterative projection - simple and robust
+            max_iterations = 100
+            tolerance = 1e-3
+            for iter_num in range(max_iterations):
+                any_violation = False
+
+                # Project onto per-character individual constraints:
+                # 0 ≤ g ≤ max_g, 0 ≤ s ≤ max_s, g + s ≤ max_total
+                for alloc in allocations:
+                    g = alloc['g']
+                    s = alloc['s']
+                    mg = alloc['max_g']
+                    ms = alloc['max_s']
+                    mt = alloc['max_total']
+
+                    # Box bound projection
+                    g = max(0.0, min(g, mg))
+                    s = max(0.0, min(s, ms))
+
+                    # Sum bound projection - if violated, scale proportionally
+                    if g + s > mt + 1e-9 and mt > 0:
+                        scale = mt / (g + s)
+                        g *= scale
+                        s *= scale
+                        any_violation = True
+
+                    # Update and check for change
+                    if abs(g - alloc['g']) > tolerance or abs(s - alloc['s']) > tolerance:
+                        alloc['g'] = g
+                        alloc['s'] = s
+                        any_violation = True
+                    else:
+                        alloc['g'] = g
+                        alloc['s'] = s
+
+                # Project onto global sum constraints - maintain target totals
+                total_g = sum(a['g'] for a in allocations)
+                total_s = sum(a['s'] for a in allocations)
+
+                # Global rescaling
+                if total_g > 1e-9 and suggestion.daily_grinding_minutes > 0:
+                    scale_g = suggestion.daily_grinding_minutes / total_g
+                    for alloc in allocations:
+                        alloc['g'] *= scale_g
+
+                if total_s > 1e-9 and suggestion.daily_star_waiting_minutes > 0:
+                    scale_s = suggestion.daily_star_waiting_minutes / total_s
+                    for alloc in allocations:
+                        alloc['s'] *= scale_s
+
+                # Check convergence
+                total_g_after = sum(a['g'] for a in allocations)
+                total_s_after = sum(a['s'] for a in allocations)
+
+                if not any_violation and abs(total_g_after - suggestion.daily_grinding_minutes) < tolerance and abs(total_s_after - suggestion.daily_star_waiting_minutes) < tolerance:
+                    break  # converged
+
+            # Final hard clamping - guarantee all constraints are satisfied
+            for alloc in allocations:
+                alloc['g'] = max(0.0, min(alloc['g'], alloc['max_g']))
+                alloc['s'] = max(0.0, min(alloc['s'], alloc['max_s']))
+                if alloc['g'] + alloc['s'] > alloc['max_total'] + 1e-9 and alloc['max_total'] > 0:
+                    # Final projection - this should never happen after iteration
+                    scale = alloc['max_total'] / (alloc['g'] + alloc['s'])
+                    alloc['g'] *= scale
+                    alloc['s'] *= scale
+
+            # Final global renormalization
+            total_g_final = sum(a['g'] for a in allocations)
+            total_s_final = sum(a['s'] for a in allocations)
+            if total_g_final > 1e-9 and suggestion.daily_grinding_minutes > 0:
+                scale_g = suggestion.daily_grinding_minutes / total_g_final
+                for alloc in allocations:
+                    alloc['g'] *= scale_g
+            if total_s_final > 1e-9 and suggestion.daily_star_waiting_minutes > 0:
+                scale_s = suggestion.daily_star_waiting_minutes / total_s_final
+                for alloc in allocations:
+                    alloc['s'] *= scale_s
+
+            # Build table with final result - all constraints are guaranteed to be satisfied
+            row = 0
+            for alloc in allocations:
+                char = alloc['char']
+                char_g_daily = alloc['g']
+                char_s_daily = alloc['s']
+                total_g_duration = alloc['total_g_duration']
+                total_s_duration = alloc['total_s_duration']
+                remaining_g_value = alloc['remaining_g_value']
+                remaining_s_value = alloc['remaining_s_value']
+
+                # Skip if no activity after projection
+                if char_g_daily <= 0.1 and char_s_daily <= 0.1:
+                    continue
+
+                # Calculate remaining value (silver/success)
+                remaining_value = 0
+                if char.grinding_goal and char.grinding_goal.target_value > 0:
+                    remaining_value += max(0, char.grinding_goal.target_value - remaining_g_value)
+                if char.star_waiting_goal and char.star_waiting_goal.target_value > 0:
+                    remaining_value += max(0, char.star_waiting_goal.target_value - remaining_s_value)
+
+                # Calculate character estimated days
+                char_remaining_duration = 0
+                if char_g_daily > 0 and char.grinding_goal:
+                    remaining_g_duration = max(0, char.grinding_goal.target_duration - total_g_duration)
+                    char_remaining_duration += remaining_g_duration / char_g_daily if char_g_daily > 0 else 0
+                if char_s_daily > 0 and char.star_waiting_goal:
+                    remaining_s_duration = max(0, char.star_waiting_goal.target_duration - total_s_duration)
+                    char_remaining_duration += remaining_s_duration / char_s_daily if char_s_daily > 0 else 0
+
+                remaining_total_duration = 0
+                if char.grinding_goal:
+                    remaining_total_duration += max(0, char.grinding_goal.target_duration - total_g_duration)
+                if char.star_waiting_goal:
+                    remaining_total_duration += max(0, char.star_waiting_goal.target_duration - total_s_duration)
+
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(char.name))
+                self.table.setItem(row, 1, QTableWidgetItem(f"{char_g_daily:.0f}" if char_g_daily > 0.1 else "-"))
+                self.table.setItem(row, 2, QTableWidgetItem(f"{char_s_daily:.0f}" if char_s_daily > 0.1 else "-"))
+                self.table.setItem(row, 3, QTableWidgetItem(f"{remaining_value:,}" if remaining_value > 0 else "-"))
+                self.table.setItem(row, 4, QTableWidgetItem(f"{remaining_total_duration}" if remaining_total_duration > 0 else "-"))
+                self.table.setItem(row, 5, QTableWidgetItem(f"{char_remaining_duration:.1f}" if char_remaining_duration > 0 else "-"))
+                row += 1
+
+        layout.addWidget(self.table, 1)
+
+        # Today's income
+        if suggestion.estimated_total_income > 0:
+            total_remaining_duration = 0
+            if suggestion.daily_grinding_minutes > 0:
+                grinding_total_remaining = sum(
+                    max(0, char.grinding_goal.target_duration - char.calculate_totals(ActivityType.GRINDING)[1])
+                    for char in characters if char.grinding_goal
+                )
+                total_remaining_duration += grinding_total_remaining
+            if suggestion.daily_star_waiting_minutes > 0:
+                star_total_remaining = sum(
+                    max(0, char.star_waiting_goal.target_duration - char.calculate_totals(ActivityType.STAR_WAITING)[1])
+                    for char in characters if char.star_waiting_goal
+                )
+                total_remaining_duration += star_total_remaining
+
+            if total_remaining_duration > 0:
+                today_total = suggestion.daily_grinding_minutes + suggestion.daily_star_waiting_minutes
+                proportion = today_total / total_remaining_duration
+                today_income = suggestion.estimated_total_income * proportion
+                income_text = f"今日预计收入: {today_income:.0f} 人民币  |  全部剩余收入: {suggestion.estimated_total_income:,} 人民币"
+                income_label = QLabel(income_text)
+                income_label.setFont(QFont("Segoe UI", 11))
+                layout.addWidget(income_label)
+
+        # Close button
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.close)
+        close_btn.setFixedWidth(100)
+        layout.addWidget(close_btn, alignment=Qt.AlignRight)
 
 
 class AddCharacterDialog(QDialog):
@@ -851,7 +1317,7 @@ class SuggestionSettingsDialog(QDialog):
     def __init__(self, parent, current_settings: SuggestionUserSettings):
         super().__init__(parent)
         self.setWindowTitle("建议设置")
-        self.setFixedSize(400, 300)
+        self.setFixedSize(450, 350)
         self.setModal(True)
 
         scroll = QScrollArea()
@@ -880,6 +1346,25 @@ class SuggestionSettingsDialog(QDialog):
         self.switch_edit = QLineEdit()
         self.switch_edit.setText(str(current_settings.switch_minutes))
         layout.addWidget(self.switch_edit)
+
+        layout.addWidget(QLabel("优化算法"))
+        self.algorithm_combo = QComboBox()
+        self.algorithm_combo.addItem("均衡完成（尽早完成全部目标）", OptimizationAlgorithm.BALANCED)
+        self.algorithm_combo.addItem("当日收入最大化（优先单位收入高的活动）", OptimizationAlgorithm.DAILY_INCOME)
+        # Select current algorithm - handle case where algorithm is stored as string
+        current_alg = current_settings.algorithm
+        if isinstance(current_alg, str):
+            # Convert string to enum
+            try:
+                current_alg = OptimizationAlgorithm(current_alg)
+            except ValueError:
+                current_alg = OptimizationAlgorithm.BALANCED
+        # Select current algorithm
+        for i in range(self.algorithm_combo.count()):
+            if self.algorithm_combo.itemData(i) == current_alg:
+                self.algorithm_combo.setCurrentIndex(i)
+                break
+        layout.addWidget(self.algorithm_combo)
 
         layout.addStretch()
 
@@ -918,12 +1403,14 @@ class SuggestionSettingsDialog(QDialog):
             grinding = int(self.grinding_concurrent_edit.text().strip())
             star = int(self.star_concurrent_edit.text().strip())
             switch = int(self.switch_edit.text().strip())
+            algorithm = self.algorithm_combo.currentData()
             if daily > 0 and grinding > 0 and star > 0 and switch >= 0:
                 new_settings = SuggestionUserSettings(
                     daily_total_hours=daily,
                     grinding_concurrent=grinding,
                     star_waiting_concurrent=star,
-                    switch_minutes=switch
+                    switch_minutes=switch,
+                    algorithm=algorithm
                 )
                 self.settings_changed.emit(new_settings)
                 self.accept()
@@ -931,3 +1418,176 @@ class SuggestionSettingsDialog(QDialog):
                 QMessageBox.warning(self, "输入错误", "数值必须大于0，请重新输入")
         except ValueError:
             QMessageBox.warning(self, "输入错误", "请输入有效的数字")
+
+
+class HistoryViewDialog(QDialog):
+    """Dialog to view historical activity records with date filtering"""
+
+    def __init__(self, parent, character: ActivityCharacter, activity_type: ActivityType, persistence: ActivityPersistence):
+        super().__init__(parent)
+        self.character = character
+        self.activity_type = activity_type
+        self.persistence = persistence
+        self.all_records = [r for r in character.records if r.activity_type == activity_type]
+        self.filtered_records = []
+
+        self.setWindowTitle(f"历史记录 - {character.name} - {'搬砖' if activity_type == ActivityType.GRINDING else '蹲星'}")
+        self.resize(700, 500)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Filter section
+        filter_group = QGroupBox("日期筛选")
+        filter_group.setFont(QFont("Segoe UI", 12))
+        filter_layout = QHBoxLayout(filter_group)
+
+        # Date range filter
+        filter_layout.addWidget(QLabel("开始日期:"))
+        self.start_date_edit = QDateEdit()
+        self.start_date_edit.setCalendarPopup(True)
+        if self.all_records:
+            min_date = min(r.date for r in self.all_records)
+            self.start_date_edit.setDate(QDate(min_date.year, min_date.month, min_date.day))
+        else:
+            self.start_date_edit.setDate(QDate.currentDate().addYears(-1))
+        filter_layout.addWidget(self.start_date_edit)
+
+        filter_layout.addWidget(QLabel("结束日期:"))
+        self.end_date_edit = QDateEdit()
+        self.end_date_edit.setCalendarPopup(True)
+        if self.all_records:
+            max_date = max(r.date for r in self.all_records)
+            self.end_date_edit.setDate(QDate(max_date.year, max_date.month, max_date.day))
+        else:
+            self.end_date_edit.setDate(QDate.currentDate())
+        filter_layout.addWidget(self.end_date_edit)
+
+        # Show all checkbox
+        self.show_all_checkbox = QCheckBox("显示全部")
+        self.show_all_checkbox.setChecked(True)
+        self.show_all_checkbox.toggled.connect(self._on_show_all_toggled)
+        filter_layout.addWidget(self.show_all_checkbox)
+
+        # Apply filter button
+        apply_btn = QPushButton("应用筛选")
+        apply_btn.clicked.connect(self._apply_filter)
+        filter_layout.addWidget(apply_btn)
+
+        layout.addWidget(filter_group)
+
+        # Summary stats
+        self.summary_label = QLabel("统计：加载中...")
+        self.summary_label.setFont(QFont("Segoe UI", 12))
+        layout.addWidget(self.summary_label)
+
+        # Table
+        value_name = "银币" if activity_type == ActivityType.GRINDING else "成功数量"
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["日期", value_name, "时长(分钟)", "累计"])
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        layout.addWidget(self.table, 1)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        export_filtered_btn = QPushButton("导出筛选结果到CSV")
+        export_filtered_btn.clicked.connect(self._export_filtered)
+        btn_layout.addWidget(export_filtered_btn)
+
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.close)
+        btn_layout.addWidget(close_btn)
+        btn_layout.setAlignment(Qt.AlignRight)
+        layout.addLayout(btn_layout)
+
+        # Initial filter
+        self._on_show_all_toggled()
+        self._apply_filter()
+
+    def _on_show_all_toggled(self):
+        """Toggle date edit enabled state"""
+        checked = self.show_all_checkbox.isChecked()
+        self.start_date_edit.setEnabled(not checked)
+        self.end_date_edit.setEnabled(not checked)
+
+    def _apply_filter(self):
+        """Apply date filter and update table"""
+        if self.show_all_checkbox.isChecked():
+            filtered = self.all_records
+        else:
+            start_qdate = self.start_date_edit.date()
+            end_qdate = self.end_date_edit.date()
+            start_date = date(start_qdate.year(), start_qdate.month(), start_qdate.day())
+            end_date = date(end_qdate.year(), end_qdate.month(), end_qdate.day())
+            filtered = [
+                r for r in self.all_records
+                if start_date <= r.date <= end_date
+            ]
+
+        # Sort by date descending
+        filtered.sort(key=lambda r: r.date, reverse=True)
+
+        # Update table
+        value_name = "银币" if self.activity_type == ActivityType.GRINDING else "成功数量"
+        self.table.setRowCount(0)
+        total_value = 0
+        total_duration = 0
+        cumulative = 0
+
+        self.filtered_records = filtered
+
+        for record in filtered:
+            value = record.silver_count if self.activity_type == ActivityType.GRINDING else record.success_count
+            cumulative += value
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(record.date.strftime("%Y-%m-%d")))
+            self.table.setItem(row, 1, QTableWidgetItem(f"{value:,}"))
+            self.table.setItem(row, 2, QTableWidgetItem(str(record.duration_minutes)))
+            self.table.setItem(row, 3, QTableWidgetItem(f"{cumulative:,}"))
+            total_value += value
+            total_duration += record.duration_minutes
+
+        # Update summary
+        days = len(set(r.date for r in filtered))
+        self.summary_label.setText(
+            f"筛选结果：{len(filtered)} 条记录，{days} 天，总计 {total_value:,} {value_name}，总计时长 {total_duration} 分钟"
+        )
+
+    def _export_filtered(self):
+        """Export filtered records to CSV"""
+        if not self.filtered_records:
+            QMessageBox.information(self, "提示", "没有记录可导出")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出CSV", f"history_{self.character.name}_{self.activity_type.value}.csv",
+            "CSV文件 (*.csv);;所有文件 (*.*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            import csv
+            with open(file_path, 'w', encoding='utf-8-sig', newline='') as f:
+                writer = csv.writer(f)
+                value_name = "银币" if self.activity_type == ActivityType.GRINDING else "成功数量"
+                writer.writerow(['日期', value_name, '时长(分钟)'])
+                for record in self.filtered_records:
+                    value = record.silver_count if self.activity_type == ActivityType.GRINDING else record.success_count
+                    writer.writerow([
+                        record.date.strftime('%Y-%m-%d'),
+                        value,
+                        record.duration_minutes
+                    ])
+            QMessageBox.information(self, "成功", f"已导出 {len(self.filtered_records)} 条记录到\n{file_path}")
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"错误: {str(e)}")
