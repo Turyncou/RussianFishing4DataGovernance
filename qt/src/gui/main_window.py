@@ -13,7 +13,7 @@ from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QPixmap
 from src.data.persistence import (
     LotteryPersistence, ActivityPersistence, StoragePersistence, BaitPersistence,
     FriendLinkPersistence, CredentialsPersistence, AppSettingsPersistence,
-    create_auto_backup, list_backups
+    DailyTaskPersistence, create_auto_backup, list_backups
 )
 from src.core.models import FriendLink
 
@@ -103,6 +103,9 @@ class MainWindow(QMainWindow):
         self._background_image_path = None
         self._background_opacity = 0.15
         self._background_label = None
+
+        # Daily tasks persistence
+        self.daily_task_persistence = None
 
         # Window setup
         self.setWindowTitle("RF4 Data Process")
@@ -298,6 +301,9 @@ class MainWindow(QMainWindow):
             self._background_image_path = settings.get('background_image_path')
             self._background_opacity = settings.get('background_opacity', 0.15)
 
+            # Initialize daily tasks persistence
+            self.daily_task_persistence = DailyTaskPersistence(os.path.join(self.data_dir, 'daily_tasks.json'))
+
             # Create automatic backup on startup
             self.backup_dir = os.path.join(self.data_dir, 'backups')
             os.makedirs(self.backup_dir, exist_ok=True)
@@ -323,6 +329,9 @@ class MainWindow(QMainWindow):
         # Create main UI
         self._create_main_ui()
         self.show_home_page()
+        # Update background after central widget is created and layout done
+        if self._background_image_path and os.path.exists(self._background_image_path):
+            QTimer.singleShot(50, self._update_background)
 
     def _create_main_ui(self):
         """Create the main UI after loading"""
@@ -413,26 +422,27 @@ class MainWindow(QMainWindow):
 
         # Home container
         home_widget = QWidget()
+        home_widget.setAutoFillBackground(False)
         home_layout = QVBoxLayout(home_widget)
         home_layout.setContentsMargins(0, 0, 0, 0)
         # Make home widget background transparent so main background shows through
         home_widget.setAutoFillBackground(False)
 
         # Welcome label
-        welcome = QLabel("欢迎使用 RF4 数据统计工具")
+        welcome = QLabel("欢迎使用RF4数据统计工具")
         welcome.setFont(QFont("Segoe UI", 32, QFont.Bold))
         welcome.setAlignment(Qt.AlignCenter)
+        welcome.setStyleSheet("background-color: transparent;")
         home_layout.addWidget(welcome)
         home_layout.addSpacing(60)
 
         # Button grid container
         btn_container = QWidget()
+        btn_container.setAutoFillBackground(False)
         grid = QGridLayout(btn_container)
         grid.setSpacing(20)
 
         # Make all columns and rows expand equally
-        for i in range(3):
-            grid.setRowStretch(i, 1)
         for i in range(2):
             grid.setColumnStretch(i, 1)
 
@@ -478,6 +488,17 @@ class MainWindow(QMainWindow):
         statistics_btn.setMinimumSize(button_size)
         statistics_btn.clicked.connect(self.show_statistics)
         grid.addWidget(statistics_btn, 2, 1)
+
+        # Row 3
+        task_btn = QPushButton("📋\n每日任务")
+        task_btn.setFont(button_font)
+        task_btn.setMinimumSize(button_size)
+        task_btn.clicked.connect(self.show_daily_tasks)
+        grid.addWidget(task_btn, 3, 0)
+
+        # Make rows expand
+        for i in range(4):
+            grid.setRowStretch(i, 1)
 
         home_layout.addWidget(btn_container, 1)
         home_layout.addStretch()
@@ -605,6 +626,28 @@ class MainWindow(QMainWindow):
         frame.show()
         self.current_widget = frame
 
+    def show_daily_tasks(self):
+        """Show daily task tracking page"""
+        from .daily_task_frame import DailyTaskFrame
+
+        self._prepare_page()
+
+        # Load current activity characters - always get latest to add/remove roles
+        characters, _ = self.activity_persistence.load_characters()
+
+        cache_key = "daily_tasks"
+        if cache_key in self._frame_cache:
+            frame = self._frame_cache[cache_key]
+            # Update with latest characters list (in case roles added/removed)
+            frame.update_data(characters)
+        else:
+            frame = DailyTaskFrame(self.daily_task_persistence, characters)
+            self._frame_cache[cache_key] = frame
+
+        self.content_layout.addWidget(frame)
+        frame.show()
+        self.current_widget = frame
+
     def open_friend_links(self):
         """Open friend links dialog"""
         from .dialogs.friend_links_dialog import FriendLinksDialog
@@ -632,6 +675,8 @@ class MainWindow(QMainWindow):
             self._frame_cache["storage"].save_data()
         if "bait" in self._frame_cache:
             self._frame_cache["bait"].save_data()
+        if "daily_tasks" in self._frame_cache:
+            self._frame_cache["daily_tasks"].save_data()
         event.accept()
 
     def open_background_settings(self):

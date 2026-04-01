@@ -39,6 +39,15 @@ def main():
     desktop_reminder = DesktopReminder()
     desktop_reminder.show()
 
+    # Connect after data loaded to set daily task data for reminders
+    def on_data_loaded():
+        # Get activity characters after loading
+        if main_window.activity_persistence and main_window.daily_task_persistence:
+            characters, _ = main_window.activity_persistence.load_characters()
+            desktop_reminder.set_daily_task_data(main_window.daily_task_persistence, characters)
+
+    main_window.data_loaded.connect(on_data_loaded)
+
     # Handle application exit
     sys.exit(app.exec())
 

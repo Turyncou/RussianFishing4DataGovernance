@@ -79,6 +79,17 @@ class SuggestionUserSettings:
 
 
 @dataclass
+class CharacterRecommendation:
+    """Per-character recommendation details"""
+    character_name: str
+    grinding_minutes: float
+    star_waiting_minutes: float
+    remaining_value: int
+    remaining_duration: int
+    estimated_days: float
+
+
+@dataclass
 class ActivitySuggestion:
     """Represents a suggestion for activity arrangement"""
     daily_grinding_minutes: float
@@ -86,6 +97,7 @@ class ActivitySuggestion:
     estimated_days_remaining: float
     estimated_total_income: float
     recommendation: str
+    recommendation_list: list[CharacterRecommendation] = field(default_factory=list)
 
 
 @dataclass
@@ -243,3 +255,41 @@ class BaitConsumption:
     def use_stock(self, quantity: int) -> None:
         """Use some stock, cannot go below zero"""
         self.total_used = min(self.total_bought, self.total_used + quantity)
+
+
+@dataclass
+class DailyTask:
+    """Represents a daily task target for a character's activity"""
+    character_name: str    # Which character this task belongs to
+    activity_type: ActivityType  # Type of activity (grinding/star waiting)
+    target_minutes: int    # Required daily duration in minutes
+    enabled: bool = True   # Whether this task is enabled
+
+    def __post_init__(self):
+        if not self.character_name.strip():
+            raise ValueError("Character name cannot be empty")
+        if self.target_minutes <= 0:
+            raise ValueError("Target minutes must be greater than zero")
+
+
+@dataclass
+class DailyTaskCompletion:
+    """Records daily task completion status"""
+    date: date
+    character_name: str
+    activity_type: ActivityType
+    target_minutes: int
+    actual_minutes: int
+    completed: bool
+
+    @property
+    def remaining_minutes(self) -> int:
+        """Remaining minutes needed to complete the task"""
+        return max(0, self.target_minutes - self.actual_minutes)
+
+    @property
+    def progress_percent(self) -> float:
+        """Progress percentage 0-100"""
+        if self.target_minutes == 0:
+            return 100.0
+        return min(100.0, (self.actual_minutes / self.target_minutes) * 100)

@@ -3,7 +3,7 @@ import sys
 import math
 import random
 from datetime import datetime, date
-from typing import Optional
+from typing import Optional, List
 import ctypes
 from ctypes import wintypes
 
@@ -18,6 +18,9 @@ from PySide6.QtGui import (
 from PySide6.QtCore import (
     Qt, QPoint, QTimer, QRect, QSize, Signal
 )
+
+from src.core.models import ActivityCharacter
+from src.data.persistence import DailyTaskPersistence, DailyTaskCompletion
 
 
 # ========== 可自定义的随机鼓励话语 ==========
@@ -144,8 +147,13 @@ class DesktopReminder(QMainWindow):
         self.daily_reminded_flags = {
             "00:00": False,
             "18:00": False,
+            "20:00": False,
             "meal": False,
         }
+
+        # Daily tasks checking
+        self.daily_task_persistence: Optional[DailyTaskPersistence] = None
+        self.activity_characters: List[ActivityCharacter] = []
 
         # Bubble animation timer
         self._bubble_timer: Optional[QTimer] = None
@@ -168,6 +176,11 @@ class DesktopReminder(QMainWindow):
 
         # Schedule first random talk after 15-30 seconds for testing
         self._schedule_random_talk()
+
+    def set_daily_task_data(self, persistence: DailyTaskPersistence, characters: List[ActivityCharacter]):
+        """Set daily task persistence and activity characters for completion checking"""
+        self.daily_task_persistence = persistence
+        self.activity_characters = characters
 
     def _on_mouse_press(self, event: QMouseEvent):
         """Start dragging"""
@@ -362,6 +375,7 @@ class DesktopReminder(QMainWindow):
         if self.last_reminded_date != today:
             self.daily_reminded_flags["00:00"] = False
             self.daily_reminded_flags["18:00"] = False
+            self.daily_reminded_flags["20:00"] = False
             self.daily_reminded_flags["meal"] = False
             self.last_reminded_date = today
 
@@ -387,6 +401,22 @@ class DesktopReminder(QMainWindow):
             # Schedule second reminder if not confirmed
             QTimer.singleShot(5 * 60 * 1000, lambda: self.check_second_reminder("18:00"))
 
+        # 20:00 - check daily tasks completion
+        elif hour == 20 and 0 <= minute < 8 and not self.daily_reminded_flags["20:00"]:
+            # Only check if we have data
+            if self.daily_task_persistence is not None:
+                incomplete = self.daily_task_persistence.get_incomplete_tasks(
+                    self.daily_task_persistence.load_tasks(),
+                    self.activity_characters
+                )
+                if incomplete:
+                    message = self._build_daily_task_reminder_message(incomplete)
+                    has_button = True
+                    triggered = True
+                    self.daily_reminded_flags["20:00"] = True
+                    # Schedule second reminder if not confirmed
+                    QTimer.singleShot(5 * 60 * 1000, lambda: self.check_second_reminder("20:00"))
+
         # Meal time reminders
         elif (hour == 12 and 0 <= minute < 30) or (hour == 18 and 30 <= minute < 60) or (hour == 7 and 0 <= minute < 30):
             if not self.daily_reminded_flags["meal"] or self.last_reminder_type != "meal":
@@ -403,6 +433,27 @@ class DesktopReminder(QMainWindow):
         if triggered and message:
             self.show_bubble(message, has_button)
 
+    def _build_daily_task_reminder_message(self, incomplete: List[DailyTaskCompletion]) -> str:
+        """Build reminder message for incomplete daily tasks"""
+        if len(incomplete) == 1:
+            task = incomplete[0]
+            type_name = "搬砖" if task.activity_type == ActivityType.GRINDING else "蹲星"
+            return (
+                f"📋 每日任务提醒\n\n{task.character_name} {type_name}\n"
+                f"还缺 {task.remaining_minutes} 分钟\n"
+                f"目标 {task.target_minutes} 分钟，今日已完成 {task.actual_minutes} 分钟\n"
+                f"加油完成今日任务哦！"
+            )
+        else:
+            message = "📋 每日任务提醒\n\n还有以下任务未完成:\n"
+            for i, task in enumerate(incomplete[:3], 1):
+                type_name = "搬砖" if task.activity_type == ActivityType.GRINDING else "蹲星"
+                message += f"{i}. {task.character_name} {type_name} - 还差 {task.remaining_minutes} 分钟\n"
+            if len(incomplete) > 3:
+                message += f"... 还有 {len(incomplete) - 3} 个任务未完成\n"
+            message += "\n加油完成今日任务哦！"
+            return message
+
     def check_second_reminder(self, reminder_type: str):
         """Check if reminder was not confirmed and remind again"""
         if self.reminder_shown:
@@ -412,6 +463,14 @@ class DesktopReminder(QMainWindow):
             self.show_bubble("⏰ 又到零点五分啦\n还记得打开加班机了吗？记得打开哦！", True, "打开了")
         elif reminder_type == "18:00":
             self.show_bubble("⏰ 到六点五分啦\n还记得开播了吗？记得开播哦！", True, "开播了")
+        elif reminder_type == "20:00" and self.daily_task_persistence is not None:
+            incomplete = self.daily_task_persistence.get_incomplete_tasks(
+                self.daily_task_persistence.load_tasks(),
+                self.activity_characters
+            )
+            if incomplete:
+                message = self._build_daily_task_reminder_message(incomplete)
+                self.show_bubble(message, True, "知道了")
 
     def _schedule_random_talk(self):
         """Schedule random small talk reminder (15-30 minutes interval)"""

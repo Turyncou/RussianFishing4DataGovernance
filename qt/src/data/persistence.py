@@ -9,7 +9,7 @@ from cryptography.fernet import Fernet
 from src.core.models import (
     LotteryPrize, ActivityRecord, ActivityCharacter, ActivityGoal, ActivityType,
     StorageCharacter, FriendLink, SuggestionUserSettings, OptimizationAlgorithm,
-    AccountCredential, BaitConsumption
+    AccountCredential, BaitConsumption, DailyTask, DailyTaskCompletion
 )
 
 
@@ -578,3 +578,93 @@ def list_backups(backup_dir: str) -> list[str]:
 
     backups.sort(reverse=True)
     return backups
+
+
+class DailyTaskPersistence(DataPersistence):
+    """Persistence for daily tasks and their completion history"""
+
+    def __init__(self, file_path: str):
+        super().__init__(file_path)
+
+    def save_tasks(self, tasks: List[DailyTask]) -> None:
+        """Save daily task definitions to file"""
+        data = {
+            'tasks': [
+                {
+                    'character_name': t.character_name,
+                    'activity_type': t.activity_type.value,
+                    'target_minutes': t.target_minutes,
+                    'enabled': t.enabled
+                }
+                for t in tasks
+            ]
+        }
+        self.save(data)
+
+    def load_tasks(self) -> List[DailyTask]:
+        """Load daily task definitions from file"""
+        data = self.load()
+        if not data:
+            return []
+
+        try:
+            tasks_data = data.get('tasks', [])
+            tasks = []
+            for item in tasks_data:
+                task = DailyTask(
+                    character_name=item.get('character_name', ''),
+                    activity_type=ActivityType(item.get('activity_type')),
+                    target_minutes=item.get('target_minutes', 0),
+                    enabled=item.get('enabled', True)
+                )
+                if task.character_name.strip():
+                    tasks.append(task)
+            return tasks
+        except (KeyError, ValueError):
+            return []
+
+    def get_today_completion(self, tasks: List[DailyTask], characters: List[ActivityCharacter]) -> List[DailyTaskCompletion]:
+        """Calculate today's completion status for all tasks based on activity records"""
+        today = date.today()
+        completions = []
+
+        for task in tasks:
+            if not task.enabled:
+                continue
+
+            # Find the corresponding character
+            char = next((c for c in characters if c.name == task.character_name), None)
+            if char is None:
+                # Character not found - skip
+                continue
+
+            # Get today's duration for this activity type
+            _, actual_duration = char.calculate_today_totals(task.activity_type)
+
+            completed = actual_duration >= task.target_minutes
+            completion = DailyTaskCompletion(
+                date=today,
+                character_name=task.character_name,
+                activity_type=task.activity_type,
+                target_minutes=task.target_minutes,
+                actual_minutes=actual_duration,
+                completed=completed
+            )
+            completions.append(completion)
+
+        return completions
+
+    def get_incomplete_tasks(self, tasks: List[DailyTask], characters: List[ActivityCharacter]) -> List[DailyTaskCompletion]:
+        """Get all incomplete tasks for today"""
+        completions = self.get_today_completion(tasks, characters)
+        return [c for c in completions if not c.completed]
+
+    def get_completion_stats(self, tasks: List[DailyTask], characters: List[ActivityCharacter]) -> tuple[int, int, float]:
+        """Get today's completion statistics: (completed_count, total_count, completion_percent)"""
+        completions = self.get_today_completion(tasks, characters)
+        if not completions:
+            return 0, 0, 100.0
+        completed = sum(1 for c in completions if c.completed)
+        total = len(completions)
+        percent = (completed / total) * 100 if total > 0 else 100.0
+        return completed, total, percent

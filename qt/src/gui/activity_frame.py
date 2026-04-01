@@ -1,4 +1,5 @@
 """Activity statistics frame (grinding + star waiting)"""
+import os
 from datetime import date, datetime
 from typing import List, Optional
 from PySide6.QtWidgets import (
@@ -15,7 +16,7 @@ from src.core.models import (
     ActivityType, ActivityRecord, ActivityCharacter, ActivityGoal,
     SuggestionUserSettings, ActivitySuggestion, OptimizationAlgorithm
 )
-from src.data.persistence import ActivityPersistence
+from src.data.persistence import ActivityPersistence, DailyTaskPersistence
 from .suggestion_calculator import calculate_suggestion_for_all
 
 
@@ -563,7 +564,12 @@ class ActivityFrame(QWidget):
             self.suggestion_label.setText("没有设置任何目标，无法生成建议\n请在各角色中设置搬砖/蹲星目标")
             return
 
-        suggestion = calculate_suggestion_for_all(self.characters, self.global_suggestion_settings)
+        # Load daily tasks and pass to calculator
+        data_dir = os.path.dirname(self.persistence.file_path)
+        daily_task_persistence = DailyTaskPersistence(os.path.join(data_dir, 'daily_tasks.json'))
+        daily_tasks = daily_task_persistence.load_tasks()
+
+        suggestion = calculate_suggestion_for_all(self.characters, self.global_suggestion_settings, daily_tasks)
         if not suggestion:
             self.suggestion_label.setText("所有目标已完成！恭喜！")
             return
@@ -793,200 +799,21 @@ class SuggestionResultDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
 
-        # Calculate total remaining durations for proportional distribution
-        total_grinding_remaining_duration = sum(
-            max(0, char.grinding_goal.target_duration - char.calculate_totals(ActivityType.GRINDING)[1])
-            for char in characters if char.grinding_goal
-        )
-        total_star_remaining_duration = sum(
-            max(0, char.star_waiting_goal.target_duration - char.calculate_totals(ActivityType.STAR_WAITING)[1])
-            for char in characters if char.star_waiting_goal
-        )
+        # Use the recommendation already calculated by calculate_suggestion_for_all
+        # No recalculation here - directly use the already-verified result
+        # This ensures GUI table matches what was logged and all constraints are satisfied
+        row = 0
+        if suggestion.recommendation_list:
+            for rec in suggestion.recommendation_list:
+                char_g_daily = rec.grinding_minutes
+                char_s_daily = rec.star_waiting_minutes
+                remaining_value = rec.remaining_value
+                remaining_total_duration = rec.remaining_duration
+                char_remaining_duration = rec.estimated_days
 
-        # Filter active characters (those with remaining work)
-        active_characters = [
-            char for char in characters
-            if (char.grinding_goal and char.calculate_totals(ActivityType.GRINDING)[2] > 0) or
-               (char.star_waiting_goal and char.calculate_totals(ActivityType.STAR_WAITING)[2] > 0)
-        ]
-
-        if not active_characters:
-            row = 0
-        else:
-            # Get daily calendar time limit per character (same for all characters)
-            daily_calendar_minutes = None
-            if parent and hasattr(parent, 'global_suggestion_settings') and parent.global_suggestion_settings:
-                daily_calendar_minutes = parent.global_suggestion_settings.daily_total_hours * 60
-            if daily_calendar_minutes is None or daily_calendar_minutes <= 0:
-                if active_characters and hasattr(active_characters[0], 'suggestion_settings'):
-                    daily_calendar_minutes = active_characters[0].suggestion_settings.daily_total_hours * 60
-            if daily_calendar_minutes is None or daily_calendar_minutes <= 0:
-                daily_calendar_minutes = 8 * 60  # Default 8 hours
-
-            # Simple Iterative Projection Method
-            # Algorithm (Combettes, 2002 - Projection Methods for Convex Feasibility Problems):
-            # 1. Start: gᵢ ∝ remaining_gᵢ, sᵢ ∝ remaining_sᵢ  (keep proportional allocation)
-            # 2. Repeat until convergence:
-            #    a. For each character: if gᵢ + sᵢ > daily_limit → scale proportionally to fit
-            #    b. Renormalize global totals: Σgᵢ = grinding_daily, Σsᵢ = star_daily
-            # 3. This simple method is proven to converge and very robust in practice
-            # Reference: https://en.wikipedia.org/wiki/Projection_method_(optimization)
-
-            # Step 1: Initial allocation
-            allocations = []
-            for char in active_characters:
-                _, total_g_duration, remaining_g_value = char.calculate_totals(ActivityType.GRINDING)
-                _, total_s_duration, remaining_s_value = char.calculate_totals(ActivityType.STAR_WAITING)
-
-                remaining_g = max(0, char.grinding_goal.target_duration - total_g_duration) if char.grinding_goal else 0.0
-                remaining_s = max(0, char.star_waiting_goal.target_duration - total_s_duration) if char.star_waiting_goal else 0.0
-
-                # Initial proportional allocation - keep the original proportion
-                if char.grinding_goal and total_grinding_remaining_duration > 0:
-                    g = (remaining_g / total_grinding_remaining_duration) * suggestion.daily_grinding_minutes
-                else:
-                    g = 0.0
-
-                if char.star_waiting_goal and total_star_remaining_duration > 0:
-                    s = (remaining_s / total_star_remaining_duration) * suggestion.daily_star_waiting_minutes
-                else:
-                    s = 0.0
-
-                # Initial bounds clamping
-                g = max(0.0, min(g, remaining_g))
-                s = max(0.0, min(s, remaining_s))
-
-                allocations.append({
-                    'char': char,
-                    'g': g,
-                    's': s,
-                    'max_g': remaining_g,
-                    'max_s': remaining_s,
-                    'max_total': daily_calendar_minutes,
-                    'total_g_duration': total_g_duration,
-                    'total_s_duration': total_s_duration,
-                    'remaining_g_value': remaining_g_value,
-                    'remaining_s_value': remaining_s_value,
-                })
-
-            # Step 2: Iterative projection - simple and robust
-            max_iterations = 100
-            tolerance = 1e-3
-            for iter_num in range(max_iterations):
-                any_violation = False
-
-                # Project onto per-character individual constraints:
-                # 0 ≤ g ≤ max_g, 0 ≤ s ≤ max_s, g + s ≤ max_total
-                for alloc in allocations:
-                    g = alloc['g']
-                    s = alloc['s']
-                    mg = alloc['max_g']
-                    ms = alloc['max_s']
-                    mt = alloc['max_total']
-
-                    # Box bound projection
-                    g = max(0.0, min(g, mg))
-                    s = max(0.0, min(s, ms))
-
-                    # Sum bound projection - if violated, scale proportionally
-                    if g + s > mt + 1e-9 and mt > 0:
-                        scale = mt / (g + s)
-                        g *= scale
-                        s *= scale
-                        any_violation = True
-
-                    # Update and check for change
-                    if abs(g - alloc['g']) > tolerance or abs(s - alloc['s']) > tolerance:
-                        alloc['g'] = g
-                        alloc['s'] = s
-                        any_violation = True
-                    else:
-                        alloc['g'] = g
-                        alloc['s'] = s
-
-                # Project onto global sum constraints - maintain target totals
-                total_g = sum(a['g'] for a in allocations)
-                total_s = sum(a['s'] for a in allocations)
-
-                # Global rescaling
-                if total_g > 1e-9 and suggestion.daily_grinding_minutes > 0:
-                    scale_g = suggestion.daily_grinding_minutes / total_g
-                    for alloc in allocations:
-                        alloc['g'] *= scale_g
-
-                if total_s > 1e-9 and suggestion.daily_star_waiting_minutes > 0:
-                    scale_s = suggestion.daily_star_waiting_minutes / total_s
-                    for alloc in allocations:
-                        alloc['s'] *= scale_s
-
-                # Check convergence
-                total_g_after = sum(a['g'] for a in allocations)
-                total_s_after = sum(a['s'] for a in allocations)
-
-                if not any_violation and abs(total_g_after - suggestion.daily_grinding_minutes) < tolerance and abs(total_s_after - suggestion.daily_star_waiting_minutes) < tolerance:
-                    break  # converged
-
-            # Final hard clamping - guarantee all constraints are satisfied
-            for alloc in allocations:
-                alloc['g'] = max(0.0, min(alloc['g'], alloc['max_g']))
-                alloc['s'] = max(0.0, min(alloc['s'], alloc['max_s']))
-                if alloc['g'] + alloc['s'] > alloc['max_total'] + 1e-9 and alloc['max_total'] > 0:
-                    # Final projection - this should never happen after iteration
-                    scale = alloc['max_total'] / (alloc['g'] + alloc['s'])
-                    alloc['g'] *= scale
-                    alloc['s'] *= scale
-
-            # Final global renormalization
-            total_g_final = sum(a['g'] for a in allocations)
-            total_s_final = sum(a['s'] for a in allocations)
-            if total_g_final > 1e-9 and suggestion.daily_grinding_minutes > 0:
-                scale_g = suggestion.daily_grinding_minutes / total_g_final
-                for alloc in allocations:
-                    alloc['g'] *= scale_g
-            if total_s_final > 1e-9 and suggestion.daily_star_waiting_minutes > 0:
-                scale_s = suggestion.daily_star_waiting_minutes / total_s_final
-                for alloc in allocations:
-                    alloc['s'] *= scale_s
-
-            # Build table with final result - all constraints are guaranteed to be satisfied
-            row = 0
-            for alloc in allocations:
-                char = alloc['char']
-                char_g_daily = alloc['g']
-                char_s_daily = alloc['s']
-                total_g_duration = alloc['total_g_duration']
-                total_s_duration = alloc['total_s_duration']
-                remaining_g_value = alloc['remaining_g_value']
-                remaining_s_value = alloc['remaining_s_value']
-
-                # Skip if no activity after projection
-                if char_g_daily <= 0.1 and char_s_daily <= 0.1:
-                    continue
-
-                # Calculate remaining value (silver/success)
-                remaining_value = 0
-                if char.grinding_goal and char.grinding_goal.target_value > 0:
-                    remaining_value += max(0, char.grinding_goal.target_value - remaining_g_value)
-                if char.star_waiting_goal and char.star_waiting_goal.target_value > 0:
-                    remaining_value += max(0, char.star_waiting_goal.target_value - remaining_s_value)
-
-                # Calculate character estimated days
-                char_remaining_duration = 0
-                if char_g_daily > 0 and char.grinding_goal:
-                    remaining_g_duration = max(0, char.grinding_goal.target_duration - total_g_duration)
-                    char_remaining_duration += remaining_g_duration / char_g_daily if char_g_daily > 0 else 0
-                if char_s_daily > 0 and char.star_waiting_goal:
-                    remaining_s_duration = max(0, char.star_waiting_goal.target_duration - total_s_duration)
-                    char_remaining_duration += remaining_s_duration / char_s_daily if char_s_daily > 0 else 0
-
-                remaining_total_duration = 0
-                if char.grinding_goal:
-                    remaining_total_duration += max(0, char.grinding_goal.target_duration - total_g_duration)
-                if char.star_waiting_goal:
-                    remaining_total_duration += max(0, char.star_waiting_goal.target_duration - total_s_duration)
-
+                # Already filtered during calculation - just display
                 self.table.insertRow(row)
-                self.table.setItem(row, 0, QTableWidgetItem(char.name))
+                self.table.setItem(row, 0, QTableWidgetItem(rec.character_name))
                 self.table.setItem(row, 1, QTableWidgetItem(f"{char_g_daily:.0f}" if char_g_daily > 0.1 else "-"))
                 self.table.setItem(row, 2, QTableWidgetItem(f"{char_s_daily:.0f}" if char_s_daily > 0.1 else "-"))
                 self.table.setItem(row, 3, QTableWidgetItem(f"{remaining_value:,}" if remaining_value > 0 else "-"))
