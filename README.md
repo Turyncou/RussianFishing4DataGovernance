@@ -33,12 +33,14 @@
 ### PySide6 GUI 桌面应用 (qt 目录)
 
 ✅ **📊 活动统计** - 多角色搬砖/蹲星统计，每日记录，目标进度条，活动推荐计算器
+✅ **📅 每日计划** - 为每个角色的搬砖/蹲星设置每日目标时长，跟踪完成进度，建议计算优先满足每日计划
 ✅ **📈 数据分析** - 四个可视化图表，动画加载，每日收益趋势、角色对比、活动分布，全数据统计
 ✅ **📦 存储计时** - 多个窝子累计时长追踪，随时增减时间
 ✅ **🎣 饵料库存** - 饵料/钓具购买使用剩余统计，实时更新库存
 ✅ **🎡 转盘抽奖** - 可配置奖品转盘，自定义概率和颜色，随机抽奖
 ✅ **🔐 账号管理** - 加密存储账号密码，Fernet 对称加密，一键复制密码，保护隐私
 ✅ **🔗 友情链接** - 可编辑好友直播链接，一键打开浏览器
+✅ **🖼️ 背景设置** - 支持自定义背景图片，可调透明度，个性化你的主界面
 ✅ **💬 桌面悬浮提醒** - 独立悬浮窗，定时提醒休息/喝水/作息，每日固定提醒，自定义提醒，点击不抢游戏焦点
 ✅ **💾 备份恢复** - 自动备份，手动备份，恢复，导出全部数据到 Excel
 ✅ **🌙 深色主题** - 完整深色主题，长时间使用保护眼睛
@@ -66,14 +68,19 @@ RussianFishing4DataGovernance/
 │       │   └── persistence.py         # JSON 持久化，加密存储
 │       └── gui/                       # PySide6 GUI 界面
 │           ├── activity_frame.py      # 活动统计主界面
-│           ├── statistics_frame.py   # 数据分析图表
-│           ├── storage_frame.py      # 存储时长统计
-│           ├── bait_frame.py         # 饵料库存统计
-│           ├── lottery_frame.py      # 转盘抽奖
-│           ├── credentials_frame.py  # 加密账号管理
-│           ├── desktop_reminder.py   # 桌面悬浮气泡提醒
-│           ├── main_window.py         # 主窗口
-│           └── dialogs/              # 备份/链接对话框
+│           ├── daily_task_frame.py    # 每日计划目标跟踪
+│           ├── suggestion_calculator.py # 活动推荐计算器
+│           ├── statistics_frame.py     # 数据分析图表
+│           ├── storage_frame.py        # 存储时长统计
+│           ├── bait_frame.py           # 饵料库存统计
+│           ├── lottery_frame.py        # 转盘抽奖
+│           ├── credentials_frame.py    # 加密账号管理
+│           ├── desktop_reminder.py     # 桌面悬浮气泡提醒
+│           ├── main_window.py           # 主窗口
+│           └── dialogs/                # 对话框
+│                   ├── backup_dialog.py     # 备份恢复
+│                   ├── friend_links_dialog.py # 友情链接
+│                   └── background_settings_dialog.py # 背景设置
 ├── src/
 │   └── activity_scheduler/             # 核心调度包（可独立使用）
 │       ├── __init__.py
