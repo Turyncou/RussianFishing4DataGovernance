@@ -45,9 +45,9 @@ class BackupRestoreDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        # Auto backup section
+        # Auto backup section - use transparent background to show dialog background
         auto_frame = QWidget()
-        auto_frame.setStyleSheet("QWidget { background-color: #252525; border-radius: 12px; }")
+        auto_frame.setStyleSheet("QWidget { background-color: transparent; border-radius: 12px; }")
         auto_layout = QVBoxLayout(auto_frame)
         auto_layout.setContentsMargins(10, 10, 10, 10)
 
@@ -105,9 +105,9 @@ class BackupRestoreDialog(QDialog):
         auto_layout.addLayout(btn_layout)
         layout.addWidget(auto_frame)
 
-        # Export section
+        # Export section - use transparent background to show dialog background
         export_frame = QWidget()
-        export_frame.setStyleSheet("QWidget { background-color: #252525; border-radius: 12px; }")
+        export_frame.setStyleSheet("QWidget { background-color: transparent; border-radius: 12px; }")
         export_layout = QVBoxLayout(export_frame)
         export_layout.setContentsMargins(10, 10, 10, 10)
 

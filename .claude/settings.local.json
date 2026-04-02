@@ -10,7 +10,9 @@
       "Bash(dir:*)",
       "Bash(C:\\\\Users\\\\turyn\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe example_usage.py)",
       "Bash(pip show:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(ls D:/Ivy/GQ/lyf/RussianFishing4DataGovernance/qt/src/gui/*.py)",
+      "Bash(grep -E \"\\\\.py$\")"
     ]
   }
 }

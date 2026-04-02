@@ -144,9 +144,9 @@ class LotteryFrame(QWidget):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        # Main content frame
+        # Main content frame - use transparent background to show main window background
         content_group = QWidget()
-        content_group.setStyleSheet("QWidget { background-color: #252525; border-radius: 12px; }")
+        content_group.setStyleSheet("QWidget { background-color: transparent; border-radius: 12px; }")
         content_layout = QHBoxLayout(content_group)
         content_layout.setContentsMargins(15, 15, 15, 15)
 
@@ -281,6 +281,20 @@ class LotteryFrame(QWidget):
         self.prizes = new_prizes
         self.persistence.save_prizes(new_prizes)
         self.refresh_wheel()
+
+    def _update_stylesheet(self):
+        """Update stylesheet for current theme - result label text color"""
+        # Get current theme from parent window
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
+
+        # Update result label text color
+        if is_dark:
+            self.result_label.setStyleSheet("QLabel { color: #ffffff; }")
+        else:
+            self.result_label.setStyleSheet("QLabel { color: #000000; }")
 
 
 class PrizeSettingsDialog(QDialog):

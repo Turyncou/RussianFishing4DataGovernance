@@ -517,11 +517,12 @@ class AppSettingsPersistence(DataPersistence):
     def __init__(self, file_path: str):
         super().__init__(file_path)
 
-    def save_settings(self, background_image_path: str = None, background_opacity: float = 0.15) -> None:
+    def save_settings(self, background_image_path: str = None, background_opacity: float = 0.15, theme: str = "dark") -> None:
         """Save application settings"""
         data = {
             'background_image_path': background_image_path if background_image_path else None,
             'background_opacity': background_opacity,
+            'theme': theme,
         }
         self.save(data)
 
@@ -532,17 +533,20 @@ class AppSettingsPersistence(DataPersistence):
             return {
                 'background_image_path': None,
                 'background_opacity': 0.15,
+                'theme': 'dark',
             }
 
         try:
             return {
                 'background_image_path': data.get('background_image_path', None),
                 'background_opacity': float(data.get('background_opacity', 0.15)),
+                'theme': data.get('theme', 'dark'),
             }
         except (KeyError, ValueError):
             return {
                 'background_image_path': None,
                 'background_opacity': 0.15,
+                'theme': 'dark',
             }
 
 

@@ -15,9 +15,9 @@ def calculate_suggestion_for_all(
     """Calculate activity suggestion for all characters combined based on total remaining work
     If daily_tasks is provided, will prioritize allocating time to meet daily task requirements first
     """
-    print(f"[DEBUG] === calculate_suggestion_for_all start ===")
-    if global_settings:
-        print(f"[DEBUG] Input global_settings daily_total_hours={global_settings.daily_total_hours}")
+    # print(f"[DEBUG] === calculate_suggestion_for_all start ===")
+    # if global_settings:
+    #     print(f"[DEBUG] Input global_settings daily_total_hours={global_settings.daily_total_hours}")
     # Aggregate remaining work across all characters
     remaining = get_remaining_all(characters)
     if remaining['total_grinding_remaining_value'] == 0 and remaining['total_star_remaining_value'] == 0:
@@ -36,14 +36,14 @@ def calculate_suggestion_for_all(
                 settings = char.suggestion_settings
                 break
 
-    print(f"[DEBUG] Final settings daily_total_hours={settings.daily_total_hours}")
+    # print(f"[DEBUG] Final settings daily_total_hours={settings.daily_total_hours}")
     # Calculate available time after accounting for switching
     total_available_minutes = settings.daily_total_hours * 60
 
     # Handle daily tasks - allocate required time first (priority)
     # Group by character: for each character, sum of all daily tasks cannot exceed daily calendar time
     daily_calendar_minutes = settings.daily_total_hours * 60
-    print(f"[DEBUG] daily_calendar_minutes per character = {daily_calendar_minutes}")
+    # print(f"[DEBUG] daily_calendar_minutes per character = {daily_calendar_minutes}")
     daily_required_by_char: dict[str, dict[ActivityType, int]] = {}
 
     if daily_tasks:
@@ -60,27 +60,27 @@ def calculate_suggestion_for_all(
 
         # Enforce constraint: for each character, total daily <= daily_calendar_minutes
         # If exceeds, scale proportionally to fit
-        print(f"[DEBUG] Before constraint, number of daily tasks: {len(daily_required_by_char)}")
-        for char_name, requirements in daily_required_by_char.items():
-            total_required = requirements[ActivityType.GRINDING] + requirements[ActivityType.STAR_WAITING]
-            print(f"[DEBUG] Character {char_name}: daily tasks sum = {total_required} minutes")
-            if total_required > daily_calendar_minutes:
-                original_g = requirements[ActivityType.GRINDING]
-                original_s = requirements[ActivityType.STAR_WAITING]
-                # Need to scale down to fit
-                scale = daily_calendar_minutes / total_required
-                requirements[ActivityType.GRINDING] = int(requirements[ActivityType.GRINDING] * scale)
-                requirements[ActivityType.STAR_WAITING] = int(requirements[ActivityType.STAR_WAITING] * scale)
-                print(f"[DEBUG] → Scaled: {requirements[ActivityType.GRINDING]}+{requirements[ActivityType.STAR_WAITING]}={requirements[ActivityType.GRINDing]+requirements[ActivityType.STAR_WAITING]}")
-                # Ensure at least 0 if rounding made it zero
-                if requirements[ActivityType.GRINDING] == 0 and requirements[ActivityType.STAR_WAITING] == 0:
-                    # Give priority to whichever was larger originally
-                    if original_g > original_s:
-                        requirements[ActivityType.GRINDING] = daily_calendar_minutes
-                    else:
-                        requirements[ActivityType.STAR_WAITING] = daily_calendar_minutes
-            else:
-                print(f"[DEBUG] → OK, within limit {daily_calendar_minutes}")
+        # print(f"[DEBUG] Before constraint, number of daily tasks: {len(daily_required_by_char)}")
+        # for char_name, requirements in daily_required_by_char.items():
+        #     total_required = requirements[ActivityType.GRINDING] + requirements[ActivityType.STAR_WAITING]
+        #     print(f"[DEBUG] Character {char_name}: daily tasks sum = {total_required} minutes")
+        #     if total_required > daily_calendar_minutes:
+        #         original_g = requirements[ActivityType.GRINDING]
+        #         original_s = requirements[ActivityType.STAR_WAITING]
+        #         # Need to scale down to fit
+        #         scale = daily_calendar_minutes / total_required
+        #         requirements[ActivityType.GRINDING] = int(requirements[ActivityType.GRINDING] * scale)
+        #         requirements[ActivityType.STAR_WAITING] = int(requirements[ActivityType.STAR_WAITING] * scale)
+        #         print(f"[DEBUG] → Scaled: {requirements[ActivityType.GRINDING]}+{requirements[ActivityType.STAR_WAITING]}={requirements[ActivityType.GRINDing]+requirements[ActivityType.STAR_WAITING]}")
+        #         # Ensure at least 0 if rounding made it zero
+        #         if requirements[ActivityType.GRINDING] == 0 and requirements[ActivityType.STAR_WAITING] == 0:
+        #             # Give priority to whichever was larger originally
+        #             if original_g > original_s:
+        #                 requirements[ActivityType.GRINDING] = daily_calendar_minutes
+        #             else:
+        #                 requirements[ActivityType.STAR_WAITING] = daily_calendar_minutes
+        #     else:
+        #         print(f"[DEBUG] → OK, within limit {daily_calendar_minutes}")
 
     # Sum across all characters for global allocation
     daily_required_grinding = sum(
@@ -436,7 +436,7 @@ def generate_recommendation(
 
         # 每个角色的每日日历时间限制：同一个角色一天不能超过这个时间
         daily_limit = daily_total_hours * 60
-        print(f"[DEBUG] daily_limit per character = {daily_limit:.0f} minutes")
+        # print(f"[DEBUG] daily_limit per character = {daily_limit:.0f} minutes")
 
         # ===========================================================================
         # 简单直接分配算法 - 绝对保证约束满足，不会出问题
@@ -502,14 +502,14 @@ def generate_recommendation(
                 'rem_g_val': rem_g_val,
                 'rem_s_val': rem_s_val,
             })
-            print(f"[DEBUG] Step 1 {char.name}: req_g={req_g:.0f}, req_s={req_s:.0f}, remaining_cap={remaining_cap:.0f}")
+            # print(f"[DEBUG] Step 1 {char.name}: req_g={req_g:.0f}, req_s={req_s:.0f}, remaining_cap={remaining_cap:.0f}")
 
-        print(f"[DEBUG] After step 1: total_req_g={total_req_g:.1f}, total_req_s={total_req_s:.1f}, total_remaining_capacity={total_remaining_capacity:.1f}")
+        # print(f"[DEBUG] After step 1: total_req_g={total_req_g:.1f}, total_req_s={total_req_s:.1f}, total_remaining_capacity={total_remaining_capacity:.1f}")
 
         # 第三步：计算全局还需要分配多少
         remaining_global_g = max(0.0, grinding_daily - total_req_g)
         remaining_global_s = max(0.0, star_daily - total_req_s)
-        print(f"[DEBUG] Global remaining: G={remaining_global_g:.1f}, S={remaining_global_s:.1f}")
+        # print(f"[DEBUG] Global remaining: G={remaining_global_g:.1f}, S={remaining_global_s:.1f}")
 
         # 第四步：分配剩余全局容量到各个角色，按剩余容量比例分配
         if total_remaining_capacity > 1e-9 and (remaining_global_g > 1e-9 or remaining_global_s > 1e-9):
@@ -544,10 +544,10 @@ def generate_recommendation(
                 alloc['g'] += extra_g
                 alloc['s'] += extra_s
 
-                print(f"[DEBUG] Step 4 {alloc['char'].name}: +g={extra_g:.1f}, +s={extra_s:.1f}, total={alloc['g']+alloc['s']:.0f}")
+                # print(f"[DEBUG] Step 4 {alloc['char'].name}: +g={extra_g:.1f}, +s={extra_s:.1f}, total={alloc['g']+alloc['s']:.0f}")
 
         # 第五步：最终保证 - 算法天然满足，这里只是保险
-        print(f"[DEBUG] Final guarantee:")
+        # print(f"[DEBUG] Final guarantee:")
         for alloc in allocs:
             # 保证不超过上限（不能超过剩余目标）
             alloc['g'] = min(alloc['g'], alloc['max_g'])
@@ -564,24 +564,24 @@ def generate_recommendation(
                     alloc['s'] = alloc['req_s'] + can_reduce_s * scale
 
         # 最终验证
-        print(f"[DEBUG] === FINAL VERIFICATION ====")
-        for alloc in allocs:
-            total = alloc['g'] + alloc['s']
-            ok = total <= daily_limit + 1e-9
-            print(f"[DEBUG] {alloc['char'].name}: g={alloc['g']:.0f}, s={alloc['s']:.0f}, sum={total:.0f}, limit={daily_limit:.0f}, OK={ok}")
+        # print(f"[DEBUG] === FINAL VERIFICATION ====")
+        # for alloc in allocs:
+        #     total = alloc['g'] + alloc['s']
+        #     ok = total <= daily_limit + 1e-9
+        #     print(f"[DEBUG] {alloc['char'].name}: g={alloc['g']:.0f}, s={alloc['s']:.0f}, sum={total:.0f}, limit={daily_limit:.0f}, OK={ok}")
 
         # 构建表格，使用最终结果
-        print(f"[DEBUG] === Final allocations after all constraints: ===")
-        for alloc in allocs:
-            char = alloc['char']
-            char_g_daily = alloc['g']
-            char_s_daily = alloc['s']
-            total_g_duration = alloc['total_g_dur']
-            total_s_duration = alloc['total_s_dur']
-            remaining_g_value = alloc['rem_g_val']
-            remaining_s_value = alloc['rem_s_val']
+        # print(f"[DEBUG] === Final allocations after all constraints: ===")
+        # for alloc in allocs:
+        #     char = alloc['char']
+        #     char_g_daily = alloc['g']
+        #     char_s_daily = alloc['s']
+        #     total_g_duration = alloc['total_g_dur']
+        #     total_s_duration = alloc['total_s_dur']
+        #     remaining_g_value = alloc['rem_g_val']
+        #     remaining_s_value = alloc['rem_s_val']
 
-            print(f"[DEBUG] Final {char.name}: g={char_g_daily:.0f}, s={char_s_daily:.0f}, sum={char_g_daily+char_s_daily:.0f}")
+        #     print(f"[DEBUG] Final {char.name}: g={char_g_daily:.0f}, s={char_s_daily:.0f}, sum={char_g_daily+char_s_daily:.0f}")
 
             # Skip if no activity after projection
             if char_g_daily <= 0.1 and char_s_daily <= 0.1:

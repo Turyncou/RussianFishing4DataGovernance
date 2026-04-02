@@ -750,6 +750,89 @@ class ActivityFrame(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "导入失败", f"错误: {str(e)}")
 
+    def _update_stylesheet(self):
+        """Update stylesheet for current theme - update character list and tables"""
+        # Get current theme from parent window
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
+
+        # Update character list
+        if hasattr(self, 'character_list'):
+            if is_dark:
+                self.character_list.setStyleSheet("""
+                    QListWidget {
+                        background-color: #1e1e1e;
+                        color: #ffffff;
+                        border: 1px solid #3a3a3a;
+                        border-radius: 6px;
+                    }
+                    QListWidget::item:selected {
+                        background-color: #1f6feb;
+                    }
+                """)
+            else:
+                self.character_list.setStyleSheet("""
+                    QListWidget {
+                        background-color: #ffffff;
+                        color: #000000;
+                        border: 1px solid #dddddd;
+                        border-radius: 6px;
+                    }
+                    QListWidget::item:selected {
+                        background-color: #1f6feb;
+                        color: #ffffff;
+                    }
+                """)
+
+        # Update daily records table
+        if hasattr(self, 'daily_table'):
+            if is_dark:
+                self.daily_table.setStyleSheet("""
+                    QTableWidget {
+                        background-color: #1e1e1e;
+                        color: #ffffff;
+                        gridline-color: #3a3a3a;
+                        border: 1px solid #3a3a3a;
+                        border-radius: 6px;
+                    }
+                    QTableWidget::item:selected {
+                        background-color: #1f6feb;
+                    }
+                    QHeaderView::section {
+                        background-color: #2d2d2d;
+                        color: #ffffff;
+                        border: 1px solid #3a3a3a;
+                        padding: 6px;
+                    }
+                """)
+            else:
+                self.daily_table.setStyleSheet("""
+                    QTableWidget {
+                        background-color: #ffffff;
+                        color: #000000;
+                        gridline-color: #dddddd;
+                        border: 1px solid #dddddd;
+                        border-radius: 6px;
+                    }
+                    QTableWidget::item:selected {
+                        background-color: #1f6feb;
+                        color: #ffffff;
+                    }
+                    QHeaderView::section {
+                        background-color: #f0f0f0;
+                        color: #000000;
+                        border: 1px solid #dddddd;
+                        padding: 6px;
+                    }
+                """)
+
+        # Update goal group text color
+        if hasattr(self, 'grinding_goal_group') and hasattr(self, 'star_goal_group'):
+            # The group box title color is handled by the main window stylesheet
+            pass
+
 
 class SuggestionResultDialog(QDialog):
     """Dialog to show suggestion result with table UI"""
@@ -771,7 +854,12 @@ class SuggestionResultDialog(QDialog):
         )
         summary_label = QLabel(summary_text)
         summary_label.setFont(QFont("Segoe UI", 12))
-        summary_label.setStyleSheet("padding: 8px; background-color: #2d2d2d; border-radius: 4px;")
+        # Use appropriate background based on current theme
+        window = self.window()
+        if hasattr(window, '_current_theme') and window._current_theme == "light":
+            summary_label.setStyleSheet("padding: 8px; background-color: #e0e0e0; border-radius: 4px;")
+        else:
+            summary_label.setStyleSheet("padding: 8px; background-color: #2d2d2d; border-radius: 4px;")
         layout.addWidget(summary_label)
 
         # Daily total

@@ -242,7 +242,15 @@ class StatisticsFrame(QWidget):
     def _plot_daily_trend_animated(self, sorted_dates, daily_silver, cumulative):
         """Plot daily trend with animation: two lines, daily and cumulative"""
         self.ax_daily.clear()
-        self._setup_dark_axes(self.ax_daily)
+        # Get current theme from parent window
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
+        if is_dark:
+            self._setup_dark_axes(self.ax_daily)
+        else:
+            self._setup_light_axes(self.ax_daily)
 
         self.ax_daily.set_title("每日银币收益 - 当日vs累计", fontsize=14)
         self.ax_daily.set_xlabel("日期", fontsize=12)
@@ -272,7 +280,10 @@ class StatisticsFrame(QWidget):
 
         # Add grid
         self.ax_daily.grid(True, alpha=0.3, color='gray')
-        self.ax_daily.legend(loc='upper left', facecolor="#333333", labelcolor="white")
+        if is_dark:
+            self.ax_daily.legend(loc='upper left', facecolor="#333333", labelcolor="white")
+        else:
+            self.ax_daily.legend(loc='upper left', facecolor="#f0f0f0", labelcolor="black")
 
         # Animate: gradually draw both lines
         def animate(frame):
@@ -295,7 +306,15 @@ class StatisticsFrame(QWidget):
     def _plot_character_comparison_animated(self, char_names, char_totals):
         """Plot character comparison with animated bars that grow from bottom"""
         self.ax_char.clear()
-        self._setup_dark_axes(self.ax_char)
+        # Get current theme from parent window
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
+        if is_dark:
+            self._setup_dark_axes(self.ax_char)
+        else:
+            self._setup_light_axes(self.ax_char)
 
         self.ax_char.set_title("各角色累计已获得银币", fontsize=14)
         self.ax_char.set_ylabel("已获得银币", fontsize=12)
@@ -314,7 +333,10 @@ class StatisticsFrame(QWidget):
         self.final_heights = char_totals
 
         # Create bars starting at 0
-        bars = self.ax_char.bar(char_names, [0] * len(char_names), color='#2196F3', edgecolor='white', linewidth=1)
+        if is_dark:
+            bars = self.ax_char.bar(char_names, [0] * len(char_names), color='#2196F3', edgecolor='white', linewidth=1)
+        else:
+            bars = self.ax_char.bar(char_names, [0] * len(char_names), color='#2196F3', edgecolor='black', linewidth=1)
         self.bars = list(bars)
 
         plt.setp(self.ax_char.get_xticklabels(), rotation=45)
@@ -343,9 +365,19 @@ class StatisticsFrame(QWidget):
     def _plot_type_distribution_pie(self, grinding_minutes, star_minutes):
         """Plot time distribution by activity type as pie chart with animation"""
         self.ax_type.clear()
-        self.fig_type.set_facecolor("#2b2b2b")
-        self.ax_type.set_facecolor("#2b2b2b")
-        self.ax_type.set_title("总活动时长分布 (按活动类型)", fontsize=14, color='white')
+        # Get current theme from parent window
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
+        if is_dark:
+            self.fig_type.set_facecolor("#2b2b2b")
+            self.ax_type.set_facecolor("#2b2b2b")
+            self.ax_type.set_title("总活动时长分布 (按活动类型)", fontsize=14, color='white')
+        else:
+            self.fig_type.set_facecolor("#ffffff")
+            self.ax_type.set_facecolor("#ffffff")
+            self.ax_type.set_title("总活动时长分布 (按活动类型)", fontsize=14, color='black')
 
         grinding_hours = grinding_minutes / 60
         star_hours = star_minutes / 60
@@ -360,9 +392,21 @@ class StatisticsFrame(QWidget):
 
         def animate(frame):
             self.ax_type.clear()
-            self.fig_type.set_facecolor("#2b2b2b")
-            self.ax_type.set_facecolor("#2b2b2b")
-            self.ax_type.set_title("总活动时长分布 (按活动类型)", fontsize=14, color='white')
+            # Get current theme
+            window = self.window()
+            is_dark = True
+            if hasattr(window, '_current_theme'):
+                is_dark = (window._current_theme == "dark")
+            if is_dark:
+                self.fig_type.set_facecolor("#2b2b2b")
+                self.ax_type.set_facecolor("#2b2b2b")
+                self.ax_type.set_title("总活动时长分布 (按活动类型)", fontsize=14, color='white')
+                text_color = 'white'
+            else:
+                self.fig_type.set_facecolor("#ffffff")
+                self.ax_type.set_facecolor("#ffffff")
+                self.ax_type.set_title("总活动时长分布 (按活动类型)", fontsize=14, color='black')
+                text_color = 'black'
             start_angle = 90 - (frame * 3.6)  # 100 frames = 360 degrees
             wedges, texts, autotexts = self.ax_type.pie(
                 sizes,
@@ -370,7 +414,7 @@ class StatisticsFrame(QWidget):
                 colors=colors,
                 autopct='%1.1f%%',
                 startangle=start_angle,
-                textprops={'color': 'white'}
+                textprops={'color': text_color}
             )
             self.ax_type.axis('equal')
             return wedges
@@ -390,9 +434,19 @@ class StatisticsFrame(QWidget):
     def _plot_character_time_distribution_pie(self, char_names, char_minutes):
         """Plot time distribution by character as pie chart with animation"""
         self.ax_char_time.clear()
-        self.fig_char_time.set_facecolor("#2b2b2b")
-        self.ax_char_time.set_facecolor("#2b2b2b")
-        self.ax_char_time.set_title("总活动时长分布 (按角色)", fontsize=14, color='white')
+        # Get current theme
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
+        if is_dark:
+            self.fig_char_time.set_facecolor("#2b2b2b")
+            self.ax_char_time.set_facecolor("#2b2b2b")
+            self.ax_char_time.set_title("总活动时长分布 (按角色)", fontsize=14, color='white')
+        else:
+            self.fig_char_time.set_facecolor("#ffffff")
+            self.ax_char_time.set_facecolor("#ffffff")
+            self.ax_char_time.set_title("总活动时长分布 (按角色)", fontsize=14, color='black')
 
         # Sort by total time descending
         sorted_pairs = sorted(zip(char_names, char_minutes), key=lambda x: x[1], reverse=True)
@@ -423,9 +477,21 @@ class StatisticsFrame(QWidget):
 
         def animate(frame):
             self.ax_char_time.clear()
-            self.fig_char_time.set_facecolor("#2b2b2b")
-            self.ax_char_time.set_facecolor("#2b2b2b")
-            self.ax_char_time.set_title("总活动时长分布 (按角色)", fontsize=14, color='white')
+            # Get current theme
+            window = self.window()
+            is_dark = True
+            if hasattr(window, '_current_theme'):
+                is_dark = (window._current_theme == "dark")
+            if is_dark:
+                self.fig_char_time.set_facecolor("#2b2b2b")
+                self.ax_char_time.set_facecolor("#2b2b2b")
+                self.ax_char_time.set_title("总活动时长分布 (按角色)", fontsize=14, color='white')
+                text_color = 'white'
+            else:
+                self.fig_char_time.set_facecolor("#ffffff")
+                self.ax_char_time.set_facecolor("#ffffff")
+                self.ax_char_time.set_title("总活动时长分布 (按角色)", fontsize=14, color='black')
+                text_color = 'black'
             start_angle = 90 - (frame * 3.6)
             wedges, texts, autotexts = self.ax_char_time.pie(
                 sizes,
@@ -433,7 +499,7 @@ class StatisticsFrame(QWidget):
                 colors=colors[:len(sizes)],
                 autopct='%1.1f%%',
                 startangle=start_angle,
-                textprops={'color': 'white'}
+                textprops={'color': text_color}
             )
             self.ax_char_time.axis('equal')
             return wedges
@@ -452,16 +518,106 @@ class StatisticsFrame(QWidget):
 
     def _show_no_data(self):
         """Show message when no data available"""
+        # Get current theme
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
         for ax, canvas in [(self.ax_daily, self.canvas_daily),
                           (self.ax_char, self.canvas_char),
                           (self.ax_type, self.canvas_type),
                           (self.ax_char_time, self.canvas_char_time)]:
             ax.clear()
-            ax.set_facecolor("#2b2b2b")
+            if is_dark:
+                ax.set_facecolor("#2b2b2b")
+                text_color = 'white'
+            else:
+                ax.set_facecolor("#ffffff")
+                text_color = 'black'
             ax.text(0.5, 0.5, '暂无活动记录数据\n请先在活动统计中添加记录',
                    horizontalalignment='center',
                    verticalalignment='center',
                    transform=ax.transAxes,
-                   color='white',
+                   color=text_color,
                    fontsize=14)
             canvas.draw()
+
+    def _setup_light_axes(self, ax):
+        """Setup light theme for axes"""
+        ax.set_facecolor("#ffffff")
+        if ax.figure is not None:
+            ax.figure.set_facecolor("#ffffff")
+        for spine in ax.spines.values():
+            spine.set_color('black')
+        ax.tick_params(axis='x', colors='black')
+        ax.tick_params(axis='y', colors='black')
+        ax.yaxis.label.set_color('black')
+        ax.xaxis.label.set_color('black')
+        ax.title.set_color('black')
+
+    def _update_stylesheet(self):
+        """Update chart theme based on current theme"""
+        # Get current theme from parent window
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
+
+        # Update description label text color
+        desc = self.findChild(QLabel)
+        if desc and hasattr(self, 'tab_widget'):
+            # The description is the second label after title
+            children = self.findChildren(QLabel)
+            if len(children) >= 2:
+                desc = children[1]
+                if is_dark:
+                    desc.setStyleSheet("color: #aaaaaa;")
+                else:
+                    desc.setStyleSheet("color: #666666;")
+
+        # Update tab widget style
+        if is_dark:
+            self.tab_widget.setStyleSheet("""
+                QTabWidget::pane {
+                    background-color: #1e1e1e;
+                    border: 1px solid #3a3a3a;
+                    border-radius: 6px;
+                }
+                QTabBar::tab {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    padding: 8px 16px;
+                    border: 1px solid #3a3a3a;
+                    border-bottom: none;
+                }
+                QTabBar::tab:selected {
+                    background-color: #1e1e1e;
+                }
+                QTabBar::tab:hover {
+                    background-color: #3a3a3a;
+                }
+            """)
+        else:
+            self.tab_widget.setStyleSheet("""
+                QTabWidget::pane {
+                    background-color: #ffffff;
+                    border: 1px solid #dddddd;
+                    border-radius: 6px;
+                }
+                QTabBar::tab {
+                    background-color: #f0f0f0;
+                    color: #000000;
+                    padding: 8px 16px;
+                    border: 1px solid #dddddd;
+                    border-bottom: none;
+                }
+                QTabBar::tab:selected {
+                    background-color: #ffffff;
+                }
+                QTabBar::tab:hover {
+                    background-color: #e0e0e0;
+                }
+            """)
+
+        # Refresh plots with new theme
+        self.refresh_plots()

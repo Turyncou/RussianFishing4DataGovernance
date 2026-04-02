@@ -24,11 +24,23 @@ class LoadingWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet("""
-            LoadingWidget {
-                background-color: #1a1a1a;
-            }
-        """)
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
+
+        if is_dark:
+            self.setStyleSheet("""
+                LoadingWidget {
+                    background-color: #1a1a1a;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                LoadingWidget {
+                    background-color: #f5f5f5;
+                }
+            """)
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
@@ -36,7 +48,10 @@ class LoadingWidget(QWidget):
         # Title
         title = QLabel("RF4 数据统计工具")
         title.setFont(QFont("Segoe UI", 32, QFont.Bold))
-        title.setStyleSheet("color: #ffffff;")
+        if is_dark:
+            title.setStyleSheet("color: #ffffff;")
+        else:
+            title.setStyleSheet("color: #000000;")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
@@ -50,17 +65,30 @@ class LoadingWidget(QWidget):
         self.progress.setRange(0, 0)  # Indeterminate mode
         self.progress.setTextVisible(False)
         self.progress.setFixedSize(200, 8)
-        self.progress.setStyleSheet("""
-            QProgressBar {
-                background-color: #2d2d2d;
-                border-radius: 4px;
-                border: none;
-            }
-            QProgressBar::chunk {
-                background-color: #1f6feb;
-                border-radius: 4px;
-            }
-        """)
+        if is_dark:
+            self.progress.setStyleSheet("""
+                QProgressBar {
+                    background-color: #2d2d2d;
+                    border-radius: 4px;
+                    border: none;
+                }
+                QProgressBar::chunk {
+                    background-color: #1f6feb;
+                    border-radius: 4px;
+                }
+            """)
+        else:
+            self.progress.setStyleSheet("""
+                QProgressBar {
+                    background-color: #e0e0e0;
+                    border-radius: 4px;
+                    border: none;
+                }
+                QProgressBar::chunk {
+                    background-color: #1f6feb;
+                    border-radius: 4px;
+                }
+            """)
         layout.addWidget(self.progress, alignment=Qt.AlignCenter)
 
         # Spacer
@@ -71,7 +99,10 @@ class LoadingWidget(QWidget):
         # Loading text
         label = QLabel("正在加载数据...")
         label.setFont(QFont("Segoe UI", 16))
-        label.setStyleSheet("color: #cccccc;")
+        if is_dark:
+            label.setStyleSheet("color: #cccccc;")
+        else:
+            label.setStyleSheet("color: #666666;")
         label.setAlignment(Qt.AlignCenter)
         layout.addWidget(label)
 
@@ -104,6 +135,9 @@ class MainWindow(QMainWindow):
         self._background_opacity = 0.15
         self._background_label = None
 
+        # Theme settings
+        self._current_theme = "dark"
+
         # Daily tasks persistence
         self.daily_task_persistence = None
 
@@ -112,7 +146,7 @@ class MainWindow(QMainWindow):
         self.resize(1200, 800)
         self.setMinimumSize(1000, 700)
 
-        # Set dark theme stylesheet
+        # Set default dark theme (will be overridden after loading settings)
         self._apply_dark_theme()
 
         # Create loading screen
@@ -277,7 +311,219 @@ class MainWindow(QMainWindow):
             QDialog {
                 background-color: #1e1e1e;
             }
+            QScrollArea {
+                background-color: transparent;
+            }
         """)
+
+    def _apply_light_theme(self):
+        """Apply light theme stylesheet"""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #f5f5f5;
+            }
+            QMenuBar {
+                background-color: #e0e0e0;
+                color: #000000;
+            }
+            QMenuBar::item {
+                background-color: transparent;
+            }
+            QMenuBar::item:selected {
+                background-color: #1f6feb;
+                color: #ffffff;
+            }
+            QMenu {
+                background-color: #f0f0f0;
+                color: #000000;
+                border: 1px solid #cccccc;
+            }
+            QMenu::item:selected {
+                background-color: #1f6feb;
+                color: #ffffff;
+            }
+            QPushButton {
+                background-color: #2c5aa0;
+                color: #ffffff;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 16px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #1a3d66;
+            }
+            QPushButton:pressed {
+                background-color: #152f4f;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #888888;
+            }
+            QLabel {
+                color: #000000;
+            }
+            QLineEdit {
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #cccccc;
+                border-radius: 4px;
+                padding: 6px;
+            }
+            QLineEdit:focus {
+                border-color: #1f6feb;
+            }
+            QComboBox {
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #cccccc;
+                border-radius: 4px;
+                padding: 6px;
+                min-height: 24px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #ffffff;
+                color: #000000;
+                selection-background-color: #1f6feb;
+            }
+            QSpinBox, QDoubleSpinBox {
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #cccccc;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QTableWidget {
+                background-color: #ffffff;
+                color: #000000;
+                gridline-color: #dddddd;
+                border: 1px solid #dddddd;
+                border-radius: 6px;
+            }
+            QTableWidget::item {
+                padding: 4px;
+            }
+            QTableWidget::item:selected {
+                background-color: #1f6feb;
+                color: #ffffff;
+            }
+            QHeaderView::section {
+                background-color: #f0f0f0;
+                color: #000000;
+                border: 1px solid #dddddd;
+                padding: 6px;
+            }
+            QScrollBar:vertical {
+                background-color: #f0f0f0;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #aaaaaa;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #888888;
+            }
+            QScrollBar:horizontal {
+                background-color: #f0f0f0;
+                height: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:horizontal {
+                background-color: #aaaaaa;
+                border-radius: 6px;
+                min-width: 20px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background-color: #888888;
+            }
+            QGroupBox {
+                border: 1px solid #cccccc;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+                color: #000000;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+            QCheckBox {
+                color: #000000;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border: 1px solid #aaaaaa;
+                border-radius: 3px;
+                background-color: #f0f0f0;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #1f6feb;
+                border-color: #1f6feb;
+            }
+            QDialog {
+                background-color: #f5f5f5;
+            }
+            QProgressBar {
+                background-color: #e0e0e0;
+                border-radius: 4px;
+                border: none;
+            }
+            QProgressBar::chunk {
+                background-color: #1f6feb;
+                border-radius: 4px;
+            }
+            QScrollArea {
+                background-color: transparent;
+            }
+        """)
+
+    def _apply_current_theme(self):
+        """Apply the currently selected theme"""
+        if self._current_theme == "dark":
+            self._apply_dark_theme()
+        else:
+            self._apply_light_theme()
+
+    def _toggle_theme(self):
+        """Toggle between dark and light theme"""
+        if self._current_theme == "dark":
+            self._current_theme = "light"
+        else:
+            self._current_theme = "dark"
+
+        self._apply_current_theme()
+
+        # Update navigation bar background for current theme
+        if hasattr(self, 'nav_bar'):
+            if self._current_theme == "dark":
+                self.nav_bar.setStyleSheet("QFrame { background-color: #252525; border-radius: 12px; }")
+            else:
+                self.nav_bar.setStyleSheet("QFrame { background-color: #e0e0e0; border-radius: 12px; }")
+
+        # Save the new theme setting
+        if self.app_settings_persistence:
+            self.app_settings_persistence.save_settings(
+                background_image_path=self._background_image_path,
+                background_opacity=self._background_opacity,
+                theme=self._current_theme
+            )
+
+        # Update background if needed
+        if self._background_image_path and os.path.exists(self._background_image_path):
+            self._update_background()
+
+        # Update stylesheet for all cached frames that support theme switching
+        for frame in self._frame_cache.values():
+            if hasattr(frame, '_update_stylesheet'):
+                frame._update_stylesheet()
 
     def _create_loading_screen(self):
         """Create loading screen as central widget"""
@@ -300,6 +546,7 @@ class MainWindow(QMainWindow):
             settings = self.app_settings_persistence.load_settings()
             self._background_image_path = settings.get('background_image_path')
             self._background_opacity = settings.get('background_opacity', 0.15)
+            self._current_theme = settings.get('theme', 'dark')
 
             # Initialize daily tasks persistence
             self.daily_task_persistence = DailyTaskPersistence(os.path.join(self.data_dir, 'daily_tasks.json'))
@@ -326,6 +573,9 @@ class MainWindow(QMainWindow):
 
     def _finish_loading(self):
         """Called after background loading completes - switch to main UI"""
+        # Apply loaded theme
+        self._apply_current_theme()
+
         # Create main UI
         self._create_main_ui()
         self.show_home_page()
@@ -344,7 +594,11 @@ class MainWindow(QMainWindow):
 
         # Top navigation bar
         self.nav_bar = QFrame()
-        self.nav_bar.setStyleSheet("QFrame { background-color: #252525; border-radius: 12px; }")
+        # Background color will be set by theme stylesheet
+        if self._current_theme == "dark":
+            self.nav_bar.setStyleSheet("QFrame { background-color: #252525; border-radius: 12px; }")
+        else:
+            self.nav_bar.setStyleSheet("QFrame { background-color: #e0e0e0; border-radius: 12px; }")
         self.nav_bar.setFixedHeight(60)
         nav_layout = QHBoxLayout(self.nav_bar)
         nav_layout.setContentsMargins(10, 10, 10, 10)
@@ -369,6 +623,12 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(self.title_label)
 
         nav_layout.addStretch()
+
+        # Theme toggle button
+        self.theme_btn = QPushButton("🌓 主题")
+        self.theme_btn.setFixedWidth(80)
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        nav_layout.addWidget(self.theme_btn)
 
         # Background settings button
         bg_btn = QPushButton("🖼️ 背景")
@@ -430,25 +690,25 @@ class MainWindow(QMainWindow):
 
         # Welcome label
         welcome = QLabel("欢迎使用RF4数据统计工具")
-        welcome.setFont(QFont("Segoe UI", 32, QFont.Bold))
+        welcome.setFont(QFont("Segoe UI", 28, QFont.Bold))
         welcome.setAlignment(Qt.AlignCenter)
         welcome.setStyleSheet("background-color: transparent;")
         home_layout.addWidget(welcome)
-        home_layout.addSpacing(60)
+        home_layout.addSpacing(40)
 
         # Button grid container
         btn_container = QWidget()
         btn_container.setAutoFillBackground(False)
         grid = QGridLayout(btn_container)
-        grid.setSpacing(20)
+        grid.setSpacing(16)
 
         # Make all columns and rows expand equally
         for i in range(2):
             grid.setColumnStretch(i, 1)
 
-        # Create big buttons
-        button_font = QFont("Segoe UI", 20, QFont.Bold)
-        button_size = QSize(220, 80)
+        # Create navigation buttons
+        button_font = QFont("Segoe UI", 16, QFont.Bold)
+        button_size = QSize(190, 70)
 
         # Row 0
         activity_btn = QPushButton("📊\n活动统计")
@@ -693,7 +953,11 @@ class MainWindow(QMainWindow):
 
         # Save settings
         if self.app_settings_persistence:
-            self.app_settings_persistence.save_settings(self._background_image_path, self._background_opacity)
+            self.app_settings_persistence.save_settings(
+                background_image_path=self._background_image_path,
+                background_opacity=self._background_opacity,
+                theme=self._current_theme
+            )
 
         # Update background display
         self._update_background()

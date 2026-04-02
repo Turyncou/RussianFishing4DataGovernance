@@ -27,106 +27,222 @@ class DailyTaskFrame(QFrame):
 
     def setup_ui(self):
         """Setup the user interface"""
-        self.setStyleSheet("""
-            QFrame {
-                background-color: transparent;
-            }
-            QGroupBox {
-                border: 1px solid #3a3a3a;
-                border-radius: 6px;
-                margin-top: 10px;
-                padding-top: 10px;
-                color: #ffffff;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-            QPushButton {
-                background-color: #2c5aa0;
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #1a3d66;
-            }
-            QPushButton:pressed {
-                background-color: #152f4f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-            QComboBox {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #444444;
-                border-radius: 4px;
-                padding: 6px;
-                min-height: 24px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                selection-background-color: #1f6feb;
-            }
-            QSpinBox {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #444444;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QCheckBox {
-                color: #ffffff;
-            }
-            QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
-                border: 1px solid #555555;
-                border-radius: 3px;
-                background-color: #2d2d2d;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #1f6feb;
-                border-color: #1f6feb;
-            }
-            QTableWidget {
-                background-color: #1e1e1e;
-                color: #ffffff;
-                gridline-color: #3a3a3a;
-                border: 1px solid #3a3a3a;
-                border-radius: 6px;
-            }
-            QTableWidget::item {
-                padding: 4px;
-            }
-            QTableWidget::item:selected {
-                background-color: #1f6feb;
-            }
-            QHeaderView::section {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3a3a3a;
-                padding: 6px;
-            }
-            QProgressBar {
-                background-color: #2d2d2d;
-                border-radius: 4px;
-                border: none;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                border-radius: 4px;
-            }
-        """)
+        # Get current theme from parent window
+        self._update_stylesheet()
+
+    def _update_stylesheet(self):
+        """Update stylesheet based on current theme"""
+        # Check if we are in light theme by checking parent window
+        parent_window = self.window()
+        is_dark = True
+        if hasattr(parent_window, '_current_theme'):
+            is_dark = (parent_window._current_theme == "dark")
+
+        if is_dark:
+            self.setStyleSheet("""
+                QFrame {
+                    background-color: transparent;
+                }
+                QGroupBox {
+                    border: 1px solid #3a3a3a;
+                    border-radius: 6px;
+                    margin-top: 10px;
+                    padding-top: 10px;
+                    color: #ffffff;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px;
+                }
+                QPushButton {
+                    background-color: #2c5aa0;
+                    color: #ffffff;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-size: 14px;
+                }
+                QPushButton:hover {
+                    background-color: #1a3d66;
+                }
+                QPushButton:pressed {
+                    background-color: #152f4f;
+                }
+                QPushButton:disabled {
+                    background-color: #555555;
+                    color: #888888;
+                }
+                QComboBox {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    border: 1px solid #444444;
+                    border-radius: 4px;
+                    padding: 6px;
+                    min-height: 24px;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    selection-background-color: #1f6feb;
+                }
+                QSpinBox {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    border: 1px solid #444444;
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+                QCheckBox {
+                    color: #ffffff;
+                }
+                QCheckBox::indicator {
+                    width: 18px;
+                    height: 18px;
+                    border: 1px solid #555555;
+                    border-radius: 3px;
+                    background-color: #2d2d2d;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #1f6feb;
+                    border-color: #1f6feb;
+                }
+                QTableWidget {
+                    background-color: #1e1e1e;
+                    color: #ffffff;
+                    gridline-color: #3a3a3a;
+                    border: 1px solid #3a3a3a;
+                    border-radius: 6px;
+                }
+                QTableWidget::item {
+                    padding: 4px;
+                }
+                QTableWidget::item:selected {
+                    background-color: #1f6feb;
+                }
+                QHeaderView::section {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    border: 1px solid #3a3a3a;
+                    padding: 6px;
+                }
+                QProgressBar {
+                    background-color: #2d2d2d;
+                    border-radius: 4px;
+                    border: none;
+                    text-align: center;
+                }
+                QProgressBar::chunk {
+                    background-color: #28a745;
+                    border-radius: 4px;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QFrame {
+                    background-color: transparent;
+                }
+                QGroupBox {
+                    border: 1px solid #cccccc;
+                    border-radius: 6px;
+                    margin-top: 10px;
+                    padding-top: 10px;
+                    color: #000000;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px;
+                }
+                QPushButton {
+                    background-color: #2c5aa0;
+                    color: #ffffff;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-size: 14px;
+                }
+                QPushButton:hover {
+                    background-color: #1a3d66;
+                }
+                QPushButton:pressed {
+                    background-color: #152f4f;
+                }
+                QPushButton:disabled {
+                    background-color: #cccccc;
+                    color: #888888;
+                }
+                QComboBox {
+                    background-color: #ffffff;
+                    color: #000000;
+                    border: 1px solid #cccccc;
+                    border-radius: 4px;
+                    padding: 6px;
+                    min-height: 24px;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #ffffff;
+                    color: #000000;
+                    selection-background-color: #1f6feb;
+                }
+                QSpinBox {
+                    background-color: #ffffff;
+                    color: #000000;
+                    border: 1px solid #cccccc;
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+                QCheckBox {
+                    color: #000000;
+                }
+                QCheckBox::indicator {
+                    width: 18px;
+                    height: 18px;
+                    border: 1px solid #aaaaaa;
+                    border-radius: 3px;
+                    background-color: #f0f0f0;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #1f6feb;
+                    border-color: #1f6feb;
+                }
+                QTableWidget {
+                    background-color: #ffffff;
+                    color: #000000;
+                    gridline-color: #dddddd;
+                    border: 1px solid #dddddd;
+                    border-radius: 6px;
+                }
+                QTableWidget::item {
+                    padding: 4px;
+                }
+                QTableWidget::item:selected {
+                    background-color: #1f6feb;
+                    color: #ffffff;
+                }
+                QHeaderView::section {
+                    background-color: #f0f0f0;
+                    color: #000000;
+                    border: 1px solid #dddddd;
+                    padding: 6px;
+                }
+                QProgressBar {
+                    background-color: #e0e0e0;
+                    border-radius: 4px;
+                    border: none;
+                    text-align: center;
+                }
+                QProgressBar::chunk {
+                    background-color: #28a745;
+                    border-radius: 4px;
+                }
+            """)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)

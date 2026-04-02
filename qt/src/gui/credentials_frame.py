@@ -72,9 +72,9 @@ class CredentialsFrame(QWidget):
 
         layout.addLayout(btn_layout)
 
-        # Selection area
+        # Selection area - use transparent background to show main window background
         selection_group = QWidget()
-        selection_group.setStyleSheet("QWidget { background-color: #252525; border-radius: 12px; }")
+        selection_group.setStyleSheet("QWidget { background-color: transparent; border-radius: 12px; }")
         selection_layout = QVBoxLayout(selection_group)
         selection_layout.setContentsMargins(20, 15, 20, 15)
         selection_layout.setSpacing(15)
@@ -248,6 +248,71 @@ class CredentialsFrame(QWidget):
     def save_data(self):
         """Save all data to persistence"""
         self.persistence.save_credentials(self.accounts)
+
+    def _update_stylesheet(self):
+        """Update stylesheet for current theme"""
+        # Get current theme from parent window
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
+
+        # Update combo box and line edit
+        if is_dark:
+            self.account_combo.setStyleSheet("""
+                QComboBox {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    border: 1px solid #3a3a3a;
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+                QComboBox::drop-down {
+                    background-color: #3a3a3a;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    selection-background-color: #1f6feb;
+                }
+            """)
+            self.password_edit.setStyleSheet("""
+                QLineEdit {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    border: 1px solid #3a3a3a;
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+            """)
+        else:
+            self.account_combo.setStyleSheet("""
+                QComboBox {
+                    background-color: #ffffff;
+                    color: #000000;
+                    border: 1px solid #dddddd;
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+                QComboBox::drop-down {
+                    background-color: #f0f0f0;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #ffffff;
+                    color: #000000;
+                    selection-background-color: #1f6feb;
+                    selection-color: #ffffff;
+                }
+            """)
+            self.password_edit.setStyleSheet("""
+                QLineEdit {
+                    background-color: #ffffff;
+                    color: #000000;
+                    border: 1px solid #dddddd;
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+            """)
 
 
 class AddEditAccountDialog(QDialog):

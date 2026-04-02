@@ -225,6 +225,56 @@ class StorageFrame(QWidget):
         """Save all data to persistence"""
         self.persistence.save_characters(self.characters)
 
+    def _update_stylesheet(self):
+        """Update stylesheet for current theme"""
+        # Get current theme from parent window
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
+
+        # Update table
+        if hasattr(self, 'table'):
+            if is_dark:
+                self.table.setStyleSheet("""
+                    QTableWidget {
+                        background-color: #1e1e1e;
+                        color: #ffffff;
+                        gridline-color: #3a3a3a;
+                        border: 1px solid #3a3a3a;
+                        border-radius: 6px;
+                    }
+                    QTableWidget::item:selected {
+                        background-color: #1f6feb;
+                    }
+                    QHeaderView::section {
+                        background-color: #2d2d2d;
+                        color: #ffffff;
+                        border: 1px solid #3a3a3a;
+                        padding: 6px;
+                    }
+                """)
+            else:
+                self.table.setStyleSheet("""
+                    QTableWidget {
+                        background-color: #ffffff;
+                        color: #000000;
+                        gridline-color: #dddddd;
+                        border: 1px solid #dddddd;
+                        border-radius: 6px;
+                    }
+                    QTableWidget::item:selected {
+                        background-color: #1f6feb;
+                        color: #ffffff;
+                    }
+                    QHeaderView::section {
+                        background-color: #f0f0f0;
+                        color: #000000;
+                        border: 1px solid #dddddd;
+                        padding: 6px;
+                    }
+                """)
+
 
 class AddStorageCharacterDialog(QDialog):
     """Dialog to add a new storage character"""
