@@ -137,6 +137,10 @@ class MainWindow(QMainWindow):
         self._resize_start_pos = None
         self._resize_start_geometry = None
 
+        # Track double-click for maximize toggle
+        self._last_click_time = 0
+        self._double_click_interval = 300  # milliseconds
+
         # Persistence instances (will be initialized in background)
         self.lottery_persistence = None
         self.activity_persistence = None
@@ -376,6 +380,20 @@ class MainWindow(QMainWindow):
                     background-color: rgba(232, 17, 35, 1);
                 }
             """)
+            self.topmost_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(80, 80, 80, 0.6);
+                    color: #ffffff;
+                    border-radius: 4px;
+                    font-size: 16px;
+                }
+                QPushButton:checked {
+                    background-color: rgba(31, 111, 235, 0.9);
+                }
+                QPushButton:hover {
+                    background-color: rgba(120, 120, 120, 0.8);
+                }
+            """)
 
     def _apply_light_theme(self):
         """Apply light theme stylesheet"""
@@ -590,6 +608,20 @@ class MainWindow(QMainWindow):
                     background-color: rgba(232, 17, 35, 1);
                 }
             """)
+            self.topmost_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(100, 100, 100, 0.5);
+                    color: #ffffff;
+                    border-radius: 4px;
+                    font-size: 16px;
+                }
+                QPushButton:checked {
+                    background-color: rgba(31, 111, 235, 0.9);
+                }
+                QPushButton:hover {
+                    background-color: rgba(100, 100, 100, 0.8);
+                }
+            """)
 
     def _apply_current_theme(self):
         """Apply the currently selected theme"""
@@ -778,6 +810,14 @@ class MainWindow(QMainWindow):
         self.central_widget.setAttribute(Qt.WA_TranslucentBackground, True)
         self.central_widget.setStyleSheet("QWidget { background-color: rgba(0, 0, 0, 0); }")
         self.setCentralWidget(self.central_widget)
+
+        # Add drop shadow effect to the entire window for better visual separation
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setColor(Qt.black)
+        shadow.setOffset(0, 0)
+        self.central_widget.setGraphicsEffect(shadow)
         main_layout = QVBoxLayout(self.central_widget)
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(8)
@@ -821,6 +861,28 @@ class MainWindow(QMainWindow):
         bg_btn.setFixedWidth(80)
         bg_btn.clicked.connect(self.open_background_settings)
         nav_layout.addWidget(bg_btn)
+
+        # Window always on top toggle button
+        self.topmost_btn = QPushButton("📌")
+        self.topmost_btn.setFixedWidth(46)
+        self.topmost_btn.setToolTip("切换窗口置顶")
+        self.topmost_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(80, 80, 80, 0.6);
+                color: #ffffff;
+                border-radius: 4px;
+                font-size: 16px;
+            }
+            QPushButton:checked {
+                background-color: rgba(31, 111, 235, 0.9);
+            }
+            QPushButton:hover {
+                background-color: rgba(120, 120, 120, 0.8);
+            }
+        """)
+        self.topmost_btn.setCheckable(True)
+        self.topmost_btn.clicked.connect(self._toggle_topmost)
+        nav_layout.addWidget(self.topmost_btn)
 
         # Window control buttons (minimize, maximize, close)
         self.min_btn = QPushButton("−")
@@ -1431,3 +1493,24 @@ class MainWindow(QMainWindow):
         else:
             self.showMaximized()
             self.max_btn.setText("❐")
+
+    def _toggle_topmost(self):
+        """Toggle window always on top"""
+        if self.topmost_btn.isChecked():
+            # Set window always on top
+            self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+            self.show()
+        else:
+            # Remove always on top
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
+            self.show()
+
+    def mouseDoubleClickEvent(self, event):
+        """Handle double-click on title bar/navigation area to toggle maximize"""
+        # Check if click is on the navigation bar area
+        pos = event.position().toPoint()
+        if pos.y() <= self.nav_bar.height() + 15:  # Within title bar area
+            self._toggle_maximize()
+            event.accept()
+        else:
+            super().mouseDoubleClickEvent(event)
