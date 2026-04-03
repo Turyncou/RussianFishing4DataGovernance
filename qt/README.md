@@ -63,6 +63,15 @@
 - 可调节背景透明度（0-100%）
 - 个性化你的工作台，随时更换
 
+### 🪟 无边框透明窗口
+- 完全无边框设计，窗口背景支持真透明
+- 导航栏完全透明，背景图片完整透出
+- 右上角自带三个窗口控制按钮：最小化、最大化/还原、关闭
+- **边缘拖拽缩放** - 所有边缘和四个角落都支持拖拽改变窗口大小
+- 鼠标自动切换对应形状光标（水平缩放、垂直缩放、对角缩放）
+- **窗口拖动** - 点击空白区域可以拖动整个窗口
+- 保持最小窗口尺寸限制（1000×700），避免内容显示不全
+
 ### 💬 桌面悬浮提醒
 - 独立悬浮圆形窗口，可拖动位置
 - **不显示在任务栏**，不占用任务栏位置
@@ -120,16 +129,63 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### 打包为单文件 exe
+### 打包为 exe (Windows)
 
-项目根目录已提供打包配置文件 `qt/rf4_data_process.spec`，直接打包：
+使用 **PyInstaller** 打包成独立可执行程序：
 
+#### 1. 安装 PyInstaller
 ```bash
-cd qt
-pyinstaller rf4_data_process.spec
+pip install pyinstaller
 ```
 
-打包完成后，exe 文件输出在 `qt/dist/` 目录，可复制到没有 Python 环境的 Windows 机器直接运行。
+#### 2. 执行打包
+
+推荐生成**目录模式**（启动更快）：
+```bash
+cd qt
+pyinstaller -D -w -i "芋泥.ico" --name "RF4DataTool" --collect-submodules PySide6.QtMultimedia main.py
+```
+
+如果需要**单个 exe 文件**（不推荐，启动较慢）：
+```bash
+cd qt
+pyinstaller -F -w -i "芋泥.ico" --name "RF4DataTool" --collect-submodules PySide6.QtMultimedia main.py
+```
+
+**参数说明**：
+- `-D` / `-F`：目录模式 / 单文件模式
+- `-w`：不显示控制台窗口（需要调试时去掉此参数）
+- `-i "芋泥.ico"`：设置程序图标
+- `--name "RF4DataTool"`：设置生成的程序名称
+- `--collect-submodules PySide6.QtMultimedia`：包含多媒体模块（用于开场视频播放）
+
+#### 3. 后处理
+
+打包完成后输出在 `qt/dist/RF4DataTool/` 目录。如果需要开场视频功能：
+
+```bash
+# 创建 video 文件夹并放入你的开场视频
+mkdir dist/RF4DataTool/video
+cp path/to/your/openingvideo.mp4 dist/RF4DataTool/video/
+```
+
+> 支持的视频格式：`.mp4` `.webm` `.avi` `.mkv` `.mov`，会自动播放找到的第一个视频。
+
+#### 4. 常见问题
+
+**问题**: 启动提示 "Could not find the Qt platform plugin windows"
+**解决**: 添加 Qt 插件路径，完整打包命令：
+
+```bash
+pyinstaller -D -w -i "芋泥.ico" --name "RF4DataTool" --collect-submodules PySide6.QtMultimedia main.py
+```
+
+如果还是缺少插件，可以手动从你的 Python 环境复制 `Lib/site-packages/PySide6/plugins/` 到打包目录。
+
+**问题**: 开场视频无法播放
+**解决**: 确保 `--collect-submodules PySide6.QtMultimedia` 参数加上，PyInstaller 需要这个提示来包含多媒体模块。
+
+打包完成后，整个 `dist/RF4DataTool` 目录可以压缩分发，在没有 Python 环境的 Windows 机器上直接运行 `RF4DataTool.exe` 即可。
 
 ## 🎨 界面主题
 
@@ -201,6 +257,8 @@ qt/
 | **加密账号管理** | ❌ | ✅ |
 | 桌面悬浮提醒 | ✅ | ✅ (焦点问题修复) |
 | **背景自定义** | ✅ | ✅ |
+| **无边框透明窗口** | ❌ | ✅ (完全无边框 + 真透明 + 自带窗口控制) |
+| **边缘拖拽缩放** | ❌ | ✅ (四边四角都支持 + 智能光标变化) |
 | 备份恢复/Excel导出 | ✅ | ✅ |
 | 友情链接 | ✅ | ✅ |
 | 原生性能 | 一般 | ✅ 更流畅 |

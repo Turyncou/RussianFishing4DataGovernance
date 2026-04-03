@@ -7,8 +7,10 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QFrame, QScrollArea, QProgressBar,
     QMessageBox, QSizePolicy
 )
-from PySide6.QtCore import Qt, QTimer, QSize, Signal
+from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtCore import Qt, QTimer, QSize, Signal, QUrl
 from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QPixmap
+from PySide6.QtMultimedia import QMediaPlayer
 
 from src.data.persistence import (
     LotteryPersistence, ActivityPersistence, StoragePersistence, BaitPersistence,
@@ -116,9 +118,24 @@ class MainWindow(QMainWindow):
 
     def __init__(self, data_dir: str):
         super().__init__()
+        # Enable true transparency for the entire window
+        # This allows seeing through the window to what's behind
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # Remove window frame border for completely frameless window
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        self.setStyleSheet("QMainWindow { background-color: rgba(0, 0, 0, 0); }");
         self.data_dir = data_dir
         self._frame_cache = {}
         self.current_widget = None
+
+        # For dragging the frameless window
+        self._drag_position = None
+
+        # For window resizing from edges
+        self._resize_margin = 8  # pixels from edge to detect resize
+        self._resize_direction = None  # None, 'left', 'right', 'top', 'bottom', 'top-left', 'top-right', 'bottom-left', 'bottom-right'
+        self._resize_start_pos = None
+        self._resize_start_geometry = None
 
         # Persistence instances (will be initialized in background)
         self.lottery_persistence = None
@@ -141,6 +158,9 @@ class MainWindow(QMainWindow):
         # Daily tasks persistence
         self.daily_task_persistence = None
 
+        # Home page navigation buttons (for theme updates)
+        self._home_buttons = []
+
         # Window setup
         self.setWindowTitle("RF4 Data Process")
         self.resize(1200, 800)
@@ -159,7 +179,10 @@ class MainWindow(QMainWindow):
         """Apply dark theme stylesheet"""
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #121212;
+                background-color: rgba(0, 0, 0, 0);
+            }
+            QWidget {
+                background-color: rgba(0, 0, 0, 0);
             }
             QMenuBar {
                 background-color: #252525;
@@ -315,12 +338,53 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
             }
         """)
+        # Update window control buttons for dark theme
+        if hasattr(self, 'min_btn') and hasattr(self, 'max_btn'):
+            self.min_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(80, 80, 80, 0.6);
+                    color: #ffffff;
+                    border-radius: 4px;
+                    font-size: 16px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: rgba(120, 120, 120, 0.8);
+                }
+            """)
+            self.max_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(80, 80, 80, 0.6);
+                    color: #ffffff;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: rgba(120, 120, 120, 0.8);
+                }
+            """)
+            self.close_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(232, 17, 35, 0.8);
+                    color: #ffffff;
+                    border-radius: 4px;
+                    font-size: 18px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: rgba(232, 17, 35, 1);
+                }
+            """)
 
     def _apply_light_theme(self):
         """Apply light theme stylesheet"""
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #f5f5f5;
+                background-color: rgba(0, 0, 0, 0);
+            }
+            QWidget {
+                background-color: rgba(0, 0, 0, 0);
             }
             QMenuBar {
                 background-color: #e0e0e0;
@@ -383,6 +447,10 @@ class MainWindow(QMainWindow):
             }
             QComboBox::drop-down {
                 border: none;
+            }
+            QComboBox::down-arrow {
+                width: 12px;
+                height: 12px;
             }
             QComboBox QAbstractItemView {
                 background-color: #ffffff;
@@ -484,6 +552,44 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
             }
         """)
+        # Update window control buttons for light theme
+        if hasattr(self, 'min_btn') and hasattr(self, 'max_btn'):
+            self.min_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(100, 100, 100, 0.5);
+                    color: #ffffff;
+                    border-radius: 4px;
+                    font-size: 16px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: rgba(100, 100, 100, 0.8);
+                }
+            """)
+            self.max_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(100, 100, 100, 0.5);
+                    color: #ffffff;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: rgba(100, 100, 100, 0.8);
+                }
+            """)
+            self.close_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(232, 17, 35, 0.8);
+                    color: #ffffff;
+                    border-radius: 4px;
+                    font-size: 18px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: rgba(232, 17, 35, 1);
+                }
+            """)
 
     def _apply_current_theme(self):
         """Apply the currently selected theme"""
@@ -501,12 +607,9 @@ class MainWindow(QMainWindow):
 
         self._apply_current_theme()
 
-        # Update navigation bar background for current theme
+        # Navigation bar fully transparent to show main background
         if hasattr(self, 'nav_bar'):
-            if self._current_theme == "dark":
-                self.nav_bar.setStyleSheet("QFrame { background-color: #252525; border-radius: 12px; }")
-            else:
-                self.nav_bar.setStyleSheet("QFrame { background-color: #e0e0e0; border-radius: 12px; }")
+            self.nav_bar.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0); border-radius: 12px; }")
 
         # Save the new theme setting
         if self.app_settings_persistence:
@@ -525,10 +628,89 @@ class MainWindow(QMainWindow):
             if hasattr(frame, '_update_stylesheet'):
                 frame._update_stylesheet()
 
+        # Update home page navigation button styles for current theme
+        if self._home_buttons and self.current_widget is not None:
+            # Only update if we're on the home page
+            base_style = """
+                QPushButton {
+                    background-color: rgba(44, 90, 160, 0.15);
+                    color: %s;
+                    border: 2px solid rgba(44, 90, 160, 0.6);
+                    border-radius: 12px;
+                    padding: 8px 12px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(44, 90, 160, 0.85);
+                    border-color: rgba(44, 90, 160, 1);
+                    color: #ffffff;
+                }
+                QPushButton:pressed {
+                    background-color: rgba(21, 47, 79, 0.95);
+                }
+            """
+            is_dark = (self._current_theme == "dark")
+            text_color = "#ffffff" if is_dark else "#000000"
+            button_style = base_style % text_color
+            for btn in self._home_buttons:
+                btn.setStyleSheet(button_style)
+
     def _create_loading_screen(self):
-        """Create loading screen as central widget"""
-        self.loading_widget = LoadingWidget()
-        self.setCentralWidget(self.loading_widget)
+        """Create loading screen - check for video and play if available, fallback to static loading"""
+        # Check if video folder exists and has any video file
+        script_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+        video_dir = os.path.join(script_dir, '..', 'video')
+
+        self._video_player = None
+        self._video_widget = None
+
+        has_video = False
+        video_path = None
+
+        if os.path.exists(video_dir):
+            # Look for common video extensions
+            extensions = ['.mp4', '.webm', '.avi', '.mkv', '.mov']
+            for file in os.listdir(video_dir):
+                ext = os.path.splitext(file)[1].lower()
+                if ext in extensions:
+                    video_path = os.path.join(video_dir, file)
+                    has_video = True
+                    break
+
+        if has_video and video_path:
+            # Create video loading screen
+            self._video_widget = QVideoWidget()
+            self.setCentralWidget(self._video_widget)
+
+            # Create media player
+            self._video_player = QMediaPlayer()
+            self._video_player.setVideoOutput(self._video_widget)
+            self._video_player.setSource(QUrl.fromLocalFile(video_path))
+
+            # Connect signal when video finishes
+            self._video_player.playbackStateChanged.connect(self._on_video_finished)
+            self._video_player.play()
+        else:
+            # Fallback to static loading widget
+            self.loading_widget = LoadingWidget()
+            self.setCentralWidget(self.loading_widget)
+
+    def _on_video_finished(self, state):
+        """Called when video playback finishes - switch to main UI"""
+        from PySide6.QtMultimedia import QMediaPlayer
+        if state == QMediaPlayer.StoppedState:
+            # Clean up video player
+            if self._video_player:
+                self._video_player.stop()
+                self._video_player = None
+            if self._video_widget:
+                self._video_widget = None
+
+            # Data loading should already be running in background
+            # Check if loading is complete, if not just keep waiting
+            if self.activity_persistence is not None:
+                # Already loaded, finish immediately
+                self._finish_loading()
+            # else: background thread still working, will call _finish_loading when done
 
     def _start_background_loading(self):
         """Start loading all data in background thread"""
@@ -573,6 +755,11 @@ class MainWindow(QMainWindow):
 
     def _finish_loading(self):
         """Called after background loading completes - switch to main UI"""
+        # If we have a video player still playing, wait for it to finish
+        if self._video_player is not None:
+            # Data loaded, just wait for video to finish before switching UI
+            return
+
         # Apply loaded theme
         self._apply_current_theme()
 
@@ -587,18 +774,17 @@ class MainWindow(QMainWindow):
         """Create the main UI after loading"""
         # Create central widget and main layout
         self.central_widget = QWidget()
+        self.central_widget.setAutoFillBackground(False)
+        self.central_widget.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.central_widget.setStyleSheet("QWidget { background-color: rgba(0, 0, 0, 0); }")
         self.setCentralWidget(self.central_widget)
         main_layout = QVBoxLayout(self.central_widget)
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(8)
 
-        # Top navigation bar
+        # Top navigation bar - fully transparent background
         self.nav_bar = QFrame()
-        # Background color will be set by theme stylesheet
-        if self._current_theme == "dark":
-            self.nav_bar.setStyleSheet("QFrame { background-color: #252525; border-radius: 12px; }")
-        else:
-            self.nav_bar.setStyleSheet("QFrame { background-color: #e0e0e0; border-radius: 12px; }")
+        self.nav_bar.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0); border-radius: 12px; }")
         self.nav_bar.setFixedHeight(60)
         nav_layout = QHBoxLayout(self.nav_bar)
         nav_layout.setContentsMargins(10, 10, 10, 10)
@@ -636,17 +822,73 @@ class MainWindow(QMainWindow):
         bg_btn.clicked.connect(self.open_background_settings)
         nav_layout.addWidget(bg_btn)
 
+        # Window control buttons (minimize, maximize, close)
+        self.min_btn = QPushButton("−")
+        self.min_btn.setFixedSize(46, 36)
+        self.min_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(80, 80, 80, 0.6);
+                color: #ffffff;
+                border-radius: 4px;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(120, 120, 120, 0.8);
+            }
+        """)
+        self.min_btn.clicked.connect(self.showMinimized)
+        nav_layout.addWidget(self.min_btn)
+
+        self.max_btn = QPushButton("□")
+        self.max_btn.setFixedSize(46, 36)
+        self.max_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(80, 80, 80, 0.6);
+                color: #ffffff;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(120, 120, 120, 0.8);
+            }
+        """)
+        self.max_btn.clicked.connect(self._toggle_maximize)
+        nav_layout.addWidget(self.max_btn)
+
+        self.close_btn = QPushButton("×")
+        self.close_btn.setFixedSize(46, 36)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(232, 17, 35, 0.8);
+                color: #ffffff;
+                border-radius: 4px;
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(232, 17, 35, 1);
+            }
+        """)
+        self.close_btn.clicked.connect(self.close)
+        nav_layout.addWidget(self.close_btn)
+
+        nav_layout.setSpacing(8)
         main_layout.addWidget(self.nav_bar)
 
         # Add background image label that covers the entire central widget
         if self._background_image_path and os.path.exists(self._background_image_path):
             self._update_background()
 
-        # Content area - scrollable
+        # Content area - scrollable, fully transparent
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.scroll_area.setStyleSheet("QScrollArea { background-color: rgba(0, 0, 0, 0); }")
         self.content_container = QWidget()
+        self.content_container.setAttribute(Qt.WA_TranslucentBackground, True)
         self.content_container.setAutoFillBackground(False)
         self.content_layout = QVBoxLayout(self.content_container)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
@@ -706,55 +948,94 @@ class MainWindow(QMainWindow):
         for i in range(2):
             grid.setColumnStretch(i, 1)
 
-        # Create navigation buttons
+        # Create navigation buttons - transparent background, only show on hover
         button_font = QFont("Segoe UI", 16, QFont.Bold)
         button_size = QSize(190, 70)
+        base_style = """
+            QPushButton {
+                background-color: rgba(44, 90, 160, 0.15);
+                color: %s;
+                border: 2px solid rgba(44, 90, 160, 0.6);
+                border-radius: 12px;
+                padding: 8px 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(44, 90, 160, 0.85);
+                border-color: rgba(44, 90, 160, 1);
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: rgba(21, 47, 79, 0.95);
+            }
+        """
+
+        # Get theme-appropriate text color
+        is_dark = (self._current_theme == "dark")
+        text_color = "#ffffff" if is_dark else "#000000"
+        button_style = base_style % text_color
+
+        # Clear old button references
+        self._home_buttons.clear()
 
         # Row 0
         activity_btn = QPushButton("📊\n活动统计")
         activity_btn.setFont(button_font)
         activity_btn.setMinimumSize(button_size)
+        activity_btn.setStyleSheet(button_style)
         activity_btn.clicked.connect(self.show_activity_stats)
         grid.addWidget(activity_btn, 0, 0)
+        self._home_buttons.append(activity_btn)
 
         storage_btn = QPushButton("📦\n存储时长")
         storage_btn.setFont(button_font)
         storage_btn.setMinimumSize(button_size)
+        storage_btn.setStyleSheet(button_style)
         storage_btn.clicked.connect(self.show_storage)
         grid.addWidget(storage_btn, 0, 1)
+        self._home_buttons.append(storage_btn)
 
         # Row 1
         bait_btn = QPushButton("🎣\n饵料库存")
         bait_btn.setFont(button_font)
         bait_btn.setMinimumSize(button_size)
+        bait_btn.setStyleSheet(button_style)
         bait_btn.clicked.connect(self.show_bait)
         grid.addWidget(bait_btn, 1, 0)
+        self._home_buttons.append(bait_btn)
 
         lottery_btn = QPushButton("🎡\n转盘抽奖")
         lottery_btn.setFont(button_font)
         lottery_btn.setMinimumSize(button_size)
+        lottery_btn.setStyleSheet(button_style)
         lottery_btn.clicked.connect(self.show_lottery)
         grid.addWidget(lottery_btn, 1, 1)
+        self._home_buttons.append(lottery_btn)
 
         # Row 2
         credentials_btn = QPushButton("🔐\n账号管理")
         credentials_btn.setFont(button_font)
         credentials_btn.setMinimumSize(button_size)
+        credentials_btn.setStyleSheet(button_style)
         credentials_btn.clicked.connect(self.show_credentials)
         grid.addWidget(credentials_btn, 2, 0)
+        self._home_buttons.append(credentials_btn)
 
         statistics_btn = QPushButton("📈\n数据分析")
         statistics_btn.setFont(button_font)
         statistics_btn.setMinimumSize(button_size)
+        statistics_btn.setStyleSheet(button_style)
         statistics_btn.clicked.connect(self.show_statistics)
         grid.addWidget(statistics_btn, 2, 1)
+        self._home_buttons.append(statistics_btn)
 
         # Row 3
         task_btn = QPushButton("📋\n每日任务")
         task_btn.setFont(button_font)
         task_btn.setMinimumSize(button_size)
+        task_btn.setStyleSheet(button_style)
         task_btn.clicked.connect(self.show_daily_tasks)
         grid.addWidget(task_btn, 3, 0)
+        self._home_buttons.append(task_btn)
 
         # Make rows expand
         for i in range(4):
@@ -971,9 +1252,11 @@ class MainWindow(QMainWindow):
             self._background_label = None
 
         if not self._background_image_path or not os.path.exists(self._background_image_path):
-            # No background, use default dark background
+            # No background image, leave window fully transparent
+            # central_widget is already transparent, nothing more to do
             return
 
+        from PySide6.QtGui import QPainter, QColor
         # Create new background label that covers the entire central widget
         self._background_label = QLabel(self.central_widget)
         pixmap = QPixmap(self._background_image_path)
@@ -984,15 +1267,19 @@ class MainWindow(QMainWindow):
                 Qt.KeepAspectRatioByExpanding,
                 Qt.SmoothTransformation
             )
-            # Apply opacity
-            palette = QPalette()
-            brush = QBrush(scaled_pixmap)
-            palette.setBrush(QPalette.Window, brush)
-            self._background_label.setPalette(palette)
-            # Make background transparent enough to not block content
-            self._background_label.setWindowOpacity(self._background_opacity)
-            self._background_label.setAutoFillBackground(True)
+
+            # Apply opacity by drawing on the pixmap itself
+            result = QPixmap(scaled_pixmap.size())
+            result.fill(QColor(0, 0, 0, 0))
+            painter = QPainter(result)
+            painter.setOpacity(self._background_opacity)
+            painter.drawPixmap(0, 0, scaled_pixmap)
+            painter.end()
+
+            # Set to label
+            self._background_label.setPixmap(result)
             self._background_label.resize(self.central_widget.size())
+            self._background_label.setAutoFillBackground(False)
             # Background goes below all other content
             self._background_label.lower()
             self._background_label.show()
@@ -1004,8 +1291,143 @@ class MainWindow(QMainWindow):
             self.current_widget.setAutoFillBackground(False)
             self.content_container.setAutoFillBackground(False)
 
+    def showEvent(self, event):
+        """Ensure transparency is applied when window shows"""
+        super().showEvent(event)
+        # Double ensure transparency
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.update()
+
     def resizeEvent(self, event):
         """Handle window resize to update background scaling"""
         super().resizeEvent(event)
         if self._background_label and self._background_image_path:
             self._update_background()
+
+    def _get_resize_direction(self, pos):
+        """Determine which edge/corner the mouse is over for resizing"""
+        rect = self.rect()
+        margin = self._resize_margin
+        x = pos.x()
+        y = pos.y()
+        w = rect.width()
+        h = rect.height()
+
+        left = x < margin
+        right = x > w - margin
+        top = y < margin
+        bottom = y > h - margin
+
+        if top and left:
+            return 'top-left'
+        elif top and right:
+            return 'top-right'
+        elif bottom and left:
+            return 'bottom-left'
+        elif bottom and right:
+            return 'bottom-right'
+        elif left:
+            return 'left'
+        elif right:
+            return 'right'
+        elif top:
+            return 'top'
+        elif bottom:
+            return 'bottom'
+        return None
+
+    def mousePressEvent(self, event):
+        """Handle mouse press for dragging the frameless window or resizing"""
+        if event.button() == Qt.LeftButton:
+            # Check if we're on a resize edge
+            self._resize_direction = self._get_resize_direction(event.position().toPoint())
+            if self._resize_direction is not None:
+                # Start resizing
+                self._resize_start_pos = event.globalPosition().toPoint()
+                self._resize_start_geometry = self.frameGeometry()
+                event.accept()
+                return
+
+            # If not resizing, check if we can drag (click on title bar or empty space)
+            # Allow dragging anywhere except over content widgets
+            child = self.childAt(event.position().toPoint())
+            if child is None or isinstance(child, QLabel) or child == self.nav_bar or child == self.bottom_bar:
+                self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for dragging the frameless window or resizing"""
+        from PySide6.QtGui import QCursor
+
+        if event.buttons() == Qt.LeftButton:
+            if self._resize_direction is not None:
+                # Handle resizing
+                delta = event.globalPosition().toPoint() - self._resize_start_pos
+                geo = self._resize_start_geometry
+                dx = delta.x()
+                dy = delta.y()
+
+                new_geo = geo
+
+                # Adjust based on which edge we're dragging
+                if 'left' in self._resize_direction:
+                    new_left = geo.left() + dx
+                    new_width = geo.width() - dx
+                    if new_width >= self.minimumWidth():
+                        new_geo.setLeft(new_left)
+                        new_geo.setWidth(new_width)
+                if 'right' in self._resize_direction:
+                    new_width = geo.width() + dx
+                    if new_width >= self.minimumWidth():
+                        new_geo.setWidth(new_width)
+                if 'top' in self._resize_direction:
+                    new_top = geo.top() + dy
+                    new_height = geo.height() - dy
+                    if new_height >= self.minimumHeight():
+                        new_geo.setTop(new_top)
+                        new_geo.setHeight(new_height)
+                if 'bottom' in self._resize_direction:
+                    new_height = geo.height() + dy
+                    if new_height >= self.minimumHeight():
+                        new_geo.setHeight(new_height)
+
+                self.setGeometry(new_geo)
+                event.accept()
+                return
+
+            elif self._drag_position is not None:
+                # Handle dragging
+                self.move(event.globalPosition().toPoint() - self._drag_position)
+                event.accept()
+        else:
+            # Update cursor shape when hovering over edges
+            direction = self._get_resize_direction(event.position().toPoint())
+            if direction is None:
+                self.setCursor(Qt.ArrowCursor)
+            elif direction in ['left', 'right']:
+                self.setCursor(Qt.SizeHorCursor)
+            elif direction in ['top', 'bottom']:
+                self.setCursor(Qt.SizeVerCursor)
+            elif direction in ['top-left', 'bottom-right']:
+                self.setCursor(Qt.SizeFDiagCursor)
+            elif direction in ['top-right', 'bottom-left']:
+                self.setCursor(Qt.SizeBDiagCursor)
+
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release to finish dragging or resizing"""
+        self._drag_position = None
+        self._resize_direction = None
+        self._resize_start_pos = None
+        self._resize_start_geometry = None
+        # Reset cursor
+        self.setCursor(Qt.ArrowCursor)
+        event.accept()
+
+    def _toggle_maximize(self):
+        """Toggle between maximized and normal window state"""
+        if self.isMaximized():
+            self.showNormal()
+            self.max_btn.setText("□")
+        else:
+            self.showMaximized()
+            self.max_btn.setText("❐")
