@@ -129,6 +129,26 @@ class ActivityPersistence(DataPersistence):
                     }
                     for r in char.records
                 ],
+                # New format: multiple goals
+                'grinding_goals': [
+                    {
+                        'activity_type': goal.activity_type.value,
+                        'target_value': goal.target_value,
+                        'target_duration': goal.target_duration,
+                        'total_income': goal.total_income
+                    }
+                    for goal in char.grinding_goals
+                ] if char.grinding_goals else None,
+                'star_waiting_goals': [
+                    {
+                        'activity_type': goal.activity_type.value,
+                        'target_value': goal.target_value,
+                        'target_duration': goal.target_duration,
+                        'total_income': goal.total_income
+                    }
+                    for goal in char.star_waiting_goals
+                ] if char.star_waiting_goals else None,
+                # Backward compatibility: single goal
                 'grinding_goal': {
                     'activity_type': char.grinding_goal.activity_type.value,
                     'target_value': char.grinding_goal.target_value,
@@ -200,24 +220,50 @@ class ActivityPersistence(DataPersistence):
             for item in characters_data:
                 char = ActivityCharacter(name=item.get('name', ''))
 
-                # Load goals
-                grinding_goal_data = item.get('grinding_goal')
-                if grinding_goal_data:
-                    char.grinding_goal = ActivityGoal(
-                        activity_type=ActivityType.GRINDING,
-                        target_value=grinding_goal_data.get('target_value', 0),
-                        target_duration=grinding_goal_data.get('target_duration', 0),
-                        total_income=grinding_goal_data.get('total_income', 0)
-                    )
+                # Load goals - try new format first (multiple goals), then backward compatibility
+                # Grinding goals
+                grinding_goals_data = item.get('grinding_goals')
+                if grinding_goals_data:
+                    for goal_data in grinding_goals_data:
+                        if goal_data:
+                            char.grinding_goals.append(ActivityGoal(
+                                activity_type=ActivityType.GRINDING,
+                                target_value=goal_data.get('target_value', 0),
+                                target_duration=goal_data.get('target_duration', 0),
+                                total_income=goal_data.get('total_income', 0)
+                            ))
+                else:
+                    # Backward compatibility: single goal
+                    grinding_goal_data = item.get('grinding_goal')
+                    if grinding_goal_data:
+                        char.grinding_goals.append(ActivityGoal(
+                            activity_type=ActivityType.GRINDING,
+                            target_value=grinding_goal_data.get('target_value', 0),
+                            target_duration=grinding_goal_data.get('target_duration', 0),
+                            total_income=grinding_goal_data.get('total_income', 0)
+                        ))
 
-                star_waiting_goal_data = item.get('star_waiting_goal')
-                if star_waiting_goal_data:
-                    char.star_waiting_goal = ActivityGoal(
-                        activity_type=ActivityType.STAR_WAITING,
-                        target_value=star_waiting_goal_data.get('target_value', 0),
-                        target_duration=star_waiting_goal_data.get('target_duration', 0),
-                        total_income=star_waiting_goal_data.get('total_income', 0)
-                    )
+                # Star waiting goals
+                star_waiting_goals_data = item.get('star_waiting_goals')
+                if star_waiting_goals_data:
+                    for goal_data in star_waiting_goals_data:
+                        if goal_data:
+                            char.star_waiting_goals.append(ActivityGoal(
+                                activity_type=ActivityType.STAR_WAITING,
+                                target_value=goal_data.get('target_value', 0),
+                                target_duration=goal_data.get('target_duration', 0),
+                                total_income=goal_data.get('total_income', 0)
+                            ))
+                else:
+                    # Backward compatibility: single goal
+                    star_waiting_goal_data = item.get('star_waiting_goal')
+                    if star_waiting_goal_data:
+                        char.star_waiting_goals.append(ActivityGoal(
+                            activity_type=ActivityType.STAR_WAITING,
+                            target_value=star_waiting_goal_data.get('target_value', 0),
+                            target_duration=star_waiting_goal_data.get('target_duration', 0),
+                            total_income=star_waiting_goal_data.get('total_income', 0)
+                        ))
 
                 # Load suggestion settings
                 settings_data = item.get('suggestion_settings')
