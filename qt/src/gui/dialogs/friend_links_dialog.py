@@ -1,5 +1,4 @@
 """Friend links dialog"""
-import webbrowser
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QInputDialog, QMessageBox,
@@ -9,6 +8,58 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
 from src.core.models import FriendLink
+
+
+class BrowserWindow(QDialog):
+    """Internal browser window for displaying links"""
+
+    def __init__(self, parent, title: str, url: str):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(900, 650)
+        self.setWindowModality(Qt.WindowModality.NonModal)
+        self.url = url
+        self.title = title
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Show loading message first
+        from PySide6.QtWidgets import QLabel
+        self.loading_label = QLabel("正在加载网页，请稍候...")
+        self.loading_label.setAlignment(Qt.AlignCenter)
+        self.loading_label.setStyleSheet("font-size: 16px; color: #666;")
+        layout.addWidget(self.loading_label)
+
+        # Load web view after event loop processes
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, self._load_webview)
+
+    def _load_webview(self):
+        """Actually load the web view after window is shown"""
+        try:
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+            from PySide6.QtCore import QUrl
+
+            # Remove loading label
+            layout = self.layout()
+            layout.removeWidget(self.loading_label)
+            self.loading_label.deleteLater()
+
+            # Create web view
+            self.web_view = QWebEngineView()
+            self.web_view.load(QUrl(self.url))
+            layout.addWidget(self.web_view)
+        except ImportError as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self, "依赖缺失",
+                "无法加载网页浏览功能，请先安装依赖：\n"
+                "cd qt\n"
+                "pip install PySide6-WebEngine>=6.5.0"
+            )
+            self.close()
 
 
 class FriendLinksDialog(QDialog):
@@ -94,10 +145,21 @@ class FriendLinksDialog(QDialog):
         return items[0].data(Qt.UserRole)
 
     def _open_selected(self, event=None):
-        """Open the selected link in browser"""
+        """Open the selected link in internal browser window"""
         link = self._get_selected()
-        if link:
-            webbrowser.open(link.url)
+        if not link:
+            return
+        try:
+            browser = BrowserWindow(self, link.text, link.url)
+            browser.setAttribute(Qt.WA_DeleteOnClose)
+            browser.show()
+        except ImportError:
+            QMessageBox.critical(
+                self, "依赖缺失",
+                "无法加载网页浏览功能，请先安装依赖：\n"
+                "cd qt\n"
+                "pip install PySide6-WebEngine>=6.5.0"
+            )
 
     def _add_link(self):
         """Open dialog to add new link"""
