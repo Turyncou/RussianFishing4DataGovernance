@@ -86,9 +86,20 @@ class ActivityCharacter:
     """Represents a character with activity statistics"""
     name: str
     records: List[ActivityRecord] = field(default_factory=list)
-    grinding_goal: Optional[ActivityGoal] = None
-    star_waiting_goal: Optional[ActivityGoal] = None
+    grinding_goals: List[ActivityGoal] = field(default_factory=list)
+    star_waiting_goals: List[ActivityGoal] = field(default_factory=list)
     suggestion_settings: SuggestionUserSettings = field(default_factory=SuggestionUserSettings)
+
+    # Backward compatibility properties
+    @property
+    def grinding_goal(self) -> Optional[ActivityGoal]:
+        """Backward compatibility: return first goal if exists"""
+        return self.grinding_goals[0] if self.grinding_goals else None
+
+    @property
+    def star_waiting_goal(self) -> Optional[ActivityGoal]:
+        """Backward compatibility: return first goal if exists"""
+        return self.star_waiting_goals[0] if self.star_waiting_goals else None
 
     def add_record(self, record: ActivityRecord) -> None:
         """Add an activity record"""
@@ -139,22 +150,31 @@ class ActivityCharacter:
         return min(progress_value, 1.0), min(progress_duration, 1.0)
 
     def get_remaining_income(self) -> int:
-        """Get remaining income based on progress"""
+        """Get remaining income from all goals
+        Each goal is independent with its own total income
+        For a goal that has both target_value and target_duration, remaining is based on whichever is less complete
+        """
         total_remaining = 0
-        # For grinding
-        if self.grinding_goal:
-            total_value, _, _ = self.calculate_totals(ActivityType.GRINDING)
-            if self.grinding_goal.target_value > 0:
-                progress = total_value / self.grinding_goal.target_value
-                remaining_ratio = 1.0 - min(progress, 1.0)
-                total_remaining += int(self.grinding_goal.total_income * remaining_ratio)
-        # For star waiting
-        if self.star_waiting_goal:
-            total_value, _, _ = self.calculate_totals(ActivityType.STAR_WAITING)
-            if self.star_waiting_goal.target_value > 0:
-                progress = total_value / self.star_waiting_goal.target_value
-                remaining_ratio = 1.0 - min(progress, 1.0)
-                total_remaining += int(self.star_waiting_goal.total_income * remaining_ratio)
+        # For all grinding goals
+        for goal in self.grinding_goals:
+            total_value, total_duration, _ = self.calculate_totals(ActivityType.GRINDING)
+            # Calculate progress for both value and duration within this goal
+            progress_value = total_value / goal.target_value if goal.target_value > 0 else 1.0
+            progress_duration = total_duration / goal.target_duration if goal.target_duration > 0 else 1.0
+            # Take the minimum progress (maximum remaining)
+            progress = min(progress_value, progress_duration)
+            remaining_ratio = 1.0 - min(progress, 1.0)
+            total_remaining += int(goal.total_income * remaining_ratio)
+        # For all star waiting goals
+        for goal in self.star_waiting_goals:
+            total_value, total_duration, _ = self.calculate_totals(ActivityType.STAR_WAITING)
+            # Calculate progress for both value and duration within this goal
+            progress_value = total_value / goal.target_value if goal.target_value > 0 else 1.0
+            progress_duration = total_duration / goal.target_duration if goal.target_duration > 0 else 1.0
+            # Take the minimum progress (maximum remaining)
+            progress = min(progress_value, progress_duration)
+            remaining_ratio = 1.0 - min(progress, 1.0)
+            total_remaining += int(goal.total_income * remaining_ratio)
         return total_remaining
 
 

@@ -32,7 +32,7 @@ def calculate_suggestion_for_all(
         # Use the first character's settings (backward compatibility)
         settings = SuggestionUserSettings()
         for char in characters:
-            if char.grinding_goal or char.star_waiting_goal:
+            if char.grinding_goals or char.star_waiting_goals:
                 settings = char.suggestion_settings
                 break
 
@@ -109,7 +109,7 @@ def calculate_suggestion_for_all(
     # Because that means you need to rotate (switch) characters during the day.
     # If total active characters <= total concurrent slots → no switching needed, everyone stays online.
     #
-    total_active_chars = len([c for c in characters if c.grinding_goal or c.star_waiting_goal])
+    total_active_chars = len([c for c in characters if c.grinding_goals or c.star_waiting_goals])
     total_concurrent_slots = settings.grinding_concurrent + settings.star_waiting_concurrent
     has_both = remaining['total_grinding_remaining_value'] > 0 and remaining['total_star_remaining_value'] > 0
     need_switching = total_active_chars > total_concurrent_slots
@@ -124,7 +124,7 @@ def calculate_suggestion_for_all(
     # If we have daily tasks, allocate required time FIRST then use remaining for overall goals
     total_concurrent_slots = min(
         settings.grinding_concurrent + settings.star_waiting_concurrent,
-        len([c for c in characters if c.grinding_goal or c.star_waiting_goal or (daily_tasks and any(t.character_name == c.name for t in daily_tasks))])
+        len([c for c in characters if c.grinding_goals or c.star_waiting_goals or (daily_tasks and any(t.character_name == c.name for t in daily_tasks))])
     )
     total_daily_capacity = total_available_minutes * total_concurrent_slots
 
@@ -162,7 +162,7 @@ def calculate_suggestion_for_all(
         if remaining['total_grinding_remaining_duration'] > 0:
             total_remaining_income_grinding = sum(
                 char.get_remaining_income()
-                for char in characters if char.grinding_goal and char.grinding_goal.total_income > 0
+                for char in characters if any(g.total_income > 0 for g in char.grinding_goals)
             )
             if total_remaining_income_grinding > 0:
                 grinding_income_per_minute = total_remaining_income_grinding / remaining['total_grinding_remaining_duration']
@@ -171,7 +171,7 @@ def calculate_suggestion_for_all(
         if remaining['total_star_remaining_duration'] > 0:
             total_remaining_income_star = sum(
                 char.get_remaining_income()
-                for char in characters if char.star_waiting_goal and char.star_waiting_goal.total_income > 0
+                for char in characters if any(g.total_income > 0 for g in char.star_waiting_goals)
             )
             if total_remaining_income_star > 0:
                 star_income_per_minute = total_remaining_income_star / remaining['total_star_remaining_duration']
@@ -334,15 +334,19 @@ def get_remaining_all(characters: list[ActivityCharacter]) -> dict:
     }
 
     for char in characters:
-        if char.grinding_goal:
+        for goal in char.grinding_goals:
             total_value, total_duration, _ = char.calculate_totals(ActivityType.GRINDING)
-            result['total_grinding_remaining_value'] += max(0, char.grinding_goal.target_value - total_value)
-            result['total_grinding_remaining_duration'] += max(0, char.grinding_goal.target_duration - total_duration)
+            if goal.target_value > 0:
+                result['total_grinding_remaining_value'] += max(0, goal.target_value - total_value)
+            if goal.target_duration > 0:
+                result['total_grinding_remaining_duration'] += max(0, goal.target_duration - total_duration)
 
-        if char.star_waiting_goal:
+        for goal in char.star_waiting_goals:
             total_value, total_duration, _ = char.calculate_totals(ActivityType.STAR_WAITING)
-            result['total_star_remaining_value'] += max(0, char.star_waiting_goal.target_value - total_value)
-            result['total_star_remaining_duration'] += max(0, char.star_waiting_goal.target_duration - total_duration)
+            if goal.target_value > 0:
+                result['total_star_remaining_value'] += max(0, goal.target_value - total_value)
+            if goal.target_duration > 0:
+                result['total_star_remaining_duration'] += max(0, goal.target_duration - total_duration)
 
     return result
 
@@ -356,15 +360,19 @@ def get_remaining(character: ActivityCharacter) -> dict:
         'star_remaining_duration': 0,
     }
 
-    if character.grinding_goal:
+    for goal in character.grinding_goals:
         total_value, total_duration, _ = character.calculate_totals(ActivityType.GRINDING)
-        result['grinding_remaining_value'] = max(0, character.grinding_goal.target_value - total_value)
-        result['grinding_remaining_duration'] = max(0, character.grinding_goal.target_duration - total_duration)
+        if goal.target_value > 0:
+            result['grinding_remaining_value'] += max(0, goal.target_value - total_value)
+        if goal.target_duration > 0:
+            result['grinding_remaining_duration'] += max(0, goal.target_duration - total_duration)
 
-    if character.star_waiting_goal:
+    for goal in character.star_waiting_goals:
         total_value, total_duration, _ = character.calculate_totals(ActivityType.STAR_WAITING)
-        result['star_remaining_value'] = max(0, character.star_waiting_goal.target_value - total_value)
-        result['star_remaining_duration'] = max(0, character.star_waiting_goal.target_duration - total_duration)
+        if goal.target_value > 0:
+            result['star_remaining_value'] += max(0, goal.target_value - total_value)
+        if goal.target_duration > 0:
+            result['star_remaining_duration'] += max(0, goal.target_duration - total_duration)
 
     return result
 
@@ -411,22 +419,39 @@ def generate_recommendation(
     recommendation_list = []
 
     # Calculate total remaining duration for proportion distribution
-    total_grinding_remaining_duration = sum(
-        max(0, char.grinding_goal.target_duration - char.calculate_totals(ActivityType.GRINDING)[1])
-        for char in characters if char.grinding_goal
-    )
+    total_grinding_remaining_duration = 0
+    for char in characters:
+        for goal in char.grinding_goals:
+            if goal.target_duration > 0:
+                _, total_duration, _ = char.calculate_totals(ActivityType.GRINDING)
+                total_grinding_remaining_duration += max(0, goal.target_duration - total_duration)
 
-    total_star_remaining_duration = sum(
-        max(0, char.star_waiting_goal.target_duration - char.calculate_totals(ActivityType.STAR_WAITING)[1])
-        for char in characters if char.star_waiting_goal
-    )
+    total_star_remaining_duration = 0
+    for char in characters:
+        for goal in char.star_waiting_goals:
+            if goal.target_duration > 0:
+                _, total_duration, _ = char.calculate_totals(ActivityType.STAR_WAITING)
+                total_star_remaining_duration += max(0, goal.target_duration - total_duration)
 
     # Filter characters that have remaining work
-    active_characters = [
-        char for char in characters
-        if (char.grinding_goal and char.calculate_totals(ActivityType.GRINDING)[2] > 0) or
-           (char.star_waiting_goal and char.calculate_totals(ActivityType.STAR_WAITING)[2] > 0)
-    ]
+    active_characters = []
+    for char in characters:
+        has_remaining = False
+        # Check all grinding goals
+        for goal in char.grinding_goals:
+            _, _, remaining_value = char.calculate_totals(ActivityType.GRINDING)
+            if remaining_value > 0:
+                has_remaining = True
+                break
+        # Check all star waiting goals
+        if not has_remaining:
+            for goal in char.star_waiting_goals:
+                _, _, remaining_value = char.calculate_totals(ActivityType.STAR_WAITING)
+                if remaining_value > 0:
+                    has_remaining = True
+                    break
+        if has_remaining:
+            active_characters.append(char)
 
     if active_characters:
         parts.append("\n【各角色详细安排】\n")
@@ -462,8 +487,16 @@ def generate_recommendation(
             _, total_g_dur, rem_g_val = char.calculate_totals(ActivityType.GRINDING)
             _, total_s_dur, rem_s_val = char.calculate_totals(ActivityType.STAR_WAITING)
 
-            rem_g = max(0, char.grinding_goal.target_duration - total_g_dur) if char.grinding_goal else 0.0
-            rem_s = max(0, char.star_waiting_goal.target_duration - total_s_dur) if char.star_waiting_goal else 0.0
+            # Sum remaining duration across all goals
+            rem_g = 0.0
+            for goal in char.grinding_goals:
+                if goal.target_duration > 0:
+                    rem_g += max(0, goal.target_duration - total_g_dur)
+
+            rem_s = 0.0
+            for goal in char.star_waiting_goals:
+                if goal.target_duration > 0:
+                    rem_s += max(0, goal.target_duration - total_s_dur)
 
             # 每日任务要求
             req_g = 0.0
@@ -595,26 +628,34 @@ def generate_recommendation(
 
             # Calculate remaining value (silver/success)
             remaining_value = 0
-            if char.grinding_goal and char.grinding_goal.target_value > 0:
-                remaining_value += max(0, char.grinding_goal.target_value - remaining_g_value)
-            if char.star_waiting_goal and char.star_waiting_goal.target_value > 0:
-                remaining_value += max(0, char.star_waiting_goal.target_value - remaining_s_value)
+            for goal in char.grinding_goals:
+                if goal.target_value > 0:
+                    remaining_value += max(0, goal.target_value - remaining_g_value)
+            for goal in char.star_waiting_goals:
+                if goal.target_value > 0:
+                    remaining_value += max(0, goal.target_value - remaining_s_value)
 
             # Calculate character estimated days
             char_remaining_duration = 0
-            if char_g_daily > 0 and char.grinding_goal:
-                remaining_g_duration = max(0, char.grinding_goal.target_duration - total_g_duration)
-                char_remaining_duration += remaining_g_duration / char_g_daily if char_g_daily > 0 else 0
-            if char_s_daily > 0 and char.star_waiting_goal:
-                remaining_s_duration = max(0, char.star_waiting_goal.target_duration - total_s_duration)
-                char_remaining_duration += remaining_s_duration / char_s_daily if char_s_daily > 0 else 0
+            if char_g_daily > 0:
+                for goal in char.grinding_goals:
+                    if goal.target_duration > 0:
+                        remaining_g_duration = max(0, goal.target_duration - total_g_duration)
+                        char_remaining_duration += remaining_g_duration / char_g_daily if char_g_daily > 0 else 0
+            if char_s_daily > 0:
+                for goal in char.star_waiting_goals:
+                    if goal.target_duration > 0:
+                        remaining_s_duration = max(0, goal.target_duration - total_s_duration)
+                        char_remaining_duration += remaining_s_duration / char_s_daily if char_s_daily > 0 else 0
 
             # Add to structured list for GUI table
             remaining_total_duration = 0
-            if char.grinding_goal:
-                remaining_total_duration += max(0, char.grinding_goal.target_duration - total_g_duration)
-            if char.star_waiting_goal:
-                remaining_total_duration += max(0, char.star_waiting_goal.target_duration - total_s_duration)
+            for goal in char.grinding_goals:
+                if goal.target_duration > 0:
+                    remaining_total_duration += max(0, goal.target_duration - total_g_duration)
+            for goal in char.star_waiting_goals:
+                if goal.target_duration > 0:
+                    remaining_total_duration += max(0, goal.target_duration - total_s_duration)
 
             recommendation_list.append(CharacterRecommendation(
                 character_name=char.name,
@@ -671,16 +712,20 @@ def generate_recommendation(
         # Calculate what proportion of total remaining work will be done today
         total_remaining_duration = 0
         if grinding_daily > 0:
-            grinding_total_remaining = sum(
-                max(0, char.grinding_goal.target_duration - char.calculate_totals(ActivityType.GRINDING)[1])
-                for char in characters if char.grinding_goal
-            )
+            grinding_total_remaining = 0
+            for char in characters:
+                for goal in char.grinding_goals:
+                    if goal.target_duration > 0:
+                        _, total_duration, _ = char.calculate_totals(ActivityType.GRINDING)
+                        grinding_total_remaining += max(0, goal.target_duration - total_duration)
             total_remaining_duration += grinding_total_remaining
         if star_daily > 0:
-            star_total_remaining = sum(
-                max(0, char.star_waiting_goal.target_duration - char.calculate_totals(ActivityType.STAR_WAITING)[1])
-                for char in characters if char.star_waiting_goal
-            )
+            star_total_remaining = 0
+            for char in characters:
+                for goal in char.star_waiting_goals:
+                    if goal.target_duration > 0:
+                        _, total_duration, _ = char.calculate_totals(ActivityType.STAR_WAITING)
+                        star_total_remaining += max(0, goal.target_duration - total_duration)
             total_remaining_duration += star_total_remaining
 
         if total_remaining_duration > 0:

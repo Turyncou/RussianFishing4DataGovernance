@@ -37,6 +37,7 @@ class ActivityFrame(QWidget):
         }
 
         self._stats_labels = {}
+        self._progress_groups = {}  # Store progress group widget per activity type
         self._progress_bars = {}
         self._tables = {}
 
@@ -186,43 +187,11 @@ class ActivityFrame(QWidget):
 
         layout.addWidget(stats_group)
 
-        # Progress bars
+        # Progress bars - save reference to progress group so we can rebuild on update
         progress_group = QGroupBox("目标进度")
         progress_group.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        progress_layout = QVBoxLayout(progress_group)
-        progress_layout.setContentsMargins(20, 10, 20, 10)
-
-        # Value progress
-        value_progress = QProgressBar()
-        value_progress.setRange(0, 100)
-        value_progress.setValue(0)
-        value_progress.setTextVisible(False)
-        progress_layout.addWidget(value_progress)
-        value_label = QLabel(f"{value_name}: 0%")
-        value_label.setFont(QFont("Segoe UI", 12))
-        progress_layout.addWidget(value_label)
-
-        # Duration progress
-        duration_progress = QProgressBar()
-        duration_progress.setRange(0, 100)
-        duration_progress.setValue(0)
-        duration_progress.setTextVisible(False)
-        progress_layout.addWidget(duration_progress)
-        duration_label = QLabel(f"时长: 0%")
-        duration_label.setFont(QFont("Segoe UI", 12))
-        progress_layout.addWidget(duration_label)
-
-        # Set goal button
-        set_goal_btn = QPushButton("设置目标")
-        set_goal_btn.setFixedWidth(120)
-        set_goal_btn.clicked.connect(lambda: self.open_set_goal(activity_type))
-        progress_layout.addWidget(set_goal_btn, alignment=Qt.AlignHCenter)
-
-        self._progress_bars[activity_type] = {
-            'value': (value_progress, value_label),
-            'duration': (duration_progress, duration_label)
-        }
-
+        self._progress_groups[activity_type] = progress_group
+        self._rebuild_progress_group(progress_group, activity_type)
         layout.addWidget(progress_group)
 
         # Data table
@@ -288,6 +257,115 @@ class ActivityFrame(QWidget):
 
         self.tab_widget.addTab(tab, tab_name)
 
+    def _rebuild_progress_group(self, progress_group: QGroupBox, activity_type: ActivityType):
+        """Rebuild the progress group with current goals data"""
+        # Clear existing layout
+        existing_layout = progress_group.layout()
+        if existing_layout:
+            # Remove all widgets from layout
+            while existing_layout.count():
+                item = existing_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+
+        # Create layout if it doesn't exist
+        if existing_layout is None:
+            progress_layout = QVBoxLayout(progress_group)
+        else:
+            progress_layout = existing_layout
+
+        progress_layout.setContentsMargins(5, 10, 5, 10)
+
+        # Scroll area for multiple goals
+        from PySide6.QtWidgets import QScrollArea, QFrame
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setMinimumHeight(200)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(10)
+
+        # Clear stored progress bar references
+        self._progress_bars[activity_type] = []
+
+        if not self.current_character:
+            return
+
+        total_value, total_duration, _ = self.current_character.calculate_totals(activity_type)
+        goals = (
+            self.current_character.grinding_goals if activity_type == ActivityType.GRINDING
+            else self.current_character.star_waiting_goals
+        )
+
+        if not goals:
+            label = QLabel("暂无目标\n点击下方按钮添加目标")
+            label.setAlignment(Qt.AlignCenter)
+            scroll_layout.addWidget(label)
+        else:
+            for i, goal in enumerate(goals):
+                goal_group = QGroupBox(f"目标 #{i+1}")
+                goal_layout = QVBoxLayout(goal_group)
+                goal_layout.setSpacing(8)
+                goal_layout.setContentsMargins(10, 5, 10, 8)
+
+                # Value progress (only if target_value > 0)
+                if goal.target_value > 0:
+                    progress_value_pct = (total_value / goal.target_value * 100) if goal.target_value > 0 else 100
+                    progress_value_pct = min(progress_value_pct, 100)
+                    value_progress = QProgressBar()
+                    value_progress.setRange(0, 100)
+                    value_progress.setValue(int(progress_value_pct))
+                    value_progress.setTextVisible(False)
+                    goal_layout.addWidget(value_progress)
+                    vname = "银币" if activity_type == ActivityType.GRINDING else "成功数量"
+                    value_label = QLabel(f"{vname}: {progress_value_pct:.1f}% - {total_value:,} / {goal.target_value:,}")
+                    value_label.setFont(QFont("Segoe UI", 12))
+                    goal_layout.addWidget(value_label)
+
+                # Duration progress (only if target_duration > 0)
+                if goal.target_duration > 0:
+                    progress_duration_pct = (total_duration / goal.target_duration * 100) if goal.target_duration > 0 else 100
+                    progress_duration_pct = min(progress_duration_pct, 100)
+                    duration_progress = QProgressBar()
+                    duration_progress.setRange(0, 100)
+                    duration_progress.setValue(int(progress_duration_pct))
+                    duration_progress.setTextVisible(False)
+                    goal_layout.addWidget(duration_progress)
+                    duration_label = QLabel(f"时长: {progress_duration_pct:.1f}% - {total_duration} / {goal.target_duration} 分钟")
+                    duration_label.setFont(QFont("Segoe UI", 12))
+                    goal_layout.addWidget(duration_label)
+
+                # Income display
+                if goal.total_income > 0:
+                    progress_value_pct = (total_value / goal.target_value * 100) if goal.target_value > 0 else 100
+                    progress_value_pct = min(progress_value_pct, 100)
+                    progress_duration_pct = (total_duration / goal.target_duration * 100) if goal.target_duration > 0 else 100
+                    progress_duration_pct = min(progress_duration_pct, 100)
+                    progress = min(progress_value_pct / 100, progress_duration_pct / 100)
+                    earned_income = int(goal.total_income * progress)
+                    remaining_income = goal.total_income - earned_income
+                    income_label = QLabel(f"已获得收入: {earned_income:,} / {goal.total_income:,}  |  剩余收入: {remaining_income:,}")
+                    goal_layout.addWidget(income_label)
+
+                scroll_layout.addWidget(goal_group)
+                self._progress_bars[activity_type].append(
+                    (value_progress if goal.target_value > 0 else None,
+                     value_label if goal.target_value > 0 else None,
+                     duration_progress if goal.target_duration > 0 else None,
+                     duration_label if goal.target_duration > 0 else None)
+                )
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        progress_layout.addWidget(scroll)
+
+        # Add goal button
+        set_goal_btn = QPushButton("添加目标")
+        set_goal_btn.setFixedWidth(120)
+        set_goal_btn.clicked.connect(lambda: self.open_set_goal(activity_type))
+        progress_layout.addWidget(set_goal_btn, alignment=Qt.AlignHCenter)
+
     def load_data(self):
         """Load data from persistence"""
         result = self.persistence.load_characters()
@@ -349,52 +427,37 @@ class ActivityFrame(QWidget):
         stats_labels['total_duration'].setText(f"{total_duration}分钟")
         stats_labels['remaining_value'].setText(f"{remaining_value:,}")
 
-        # Calculate income progress
-        goal = (
-            self.current_character.grinding_goal
+        # Calculate income progress - sum across all goals
+        goals = (
+            self.current_character.grinding_goals
             if activity_type == ActivityType.GRINDING
-            else self.current_character.star_waiting_goal
+            else self.current_character.star_waiting_goals
         )
-        if goal and goal.total_income > 0:
-            total_income = goal.total_income
-            earned_income = 0
-            if activity_type == ActivityType.GRINDING:
-                if self.current_character.grinding_goal:
-                    total_value_g, _, _ = self.current_character.calculate_totals(ActivityType.GRINDING)
-                    if self.current_character.grinding_goal.target_value > 0:
-                        progress = total_value_g / self.current_character.grinding_goal.target_value
+        total_income_all = sum(goal.total_income for goal in goals)
+        earned_income_all = 0
+        if goals:
+            total_value_all, _, _ = self.current_character.calculate_totals(activity_type)
+            for goal in goals:
+                if goal.total_income > 0:
+                    if goal.target_value > 0:
+                        progress = total_value_all / goal.target_value if goal.target_value > 0 else 1.0
                         progress = min(progress, 1.0)
-                        earned_income = int(self.current_character.grinding_goal.total_income * progress)
-            else:
-                if self.current_character.star_waiting_goal:
-                    total_value_s, _, _ = self.current_character.calculate_totals(ActivityType.STAR_WAITING)
-                    if self.current_character.star_waiting_goal.target_value > 0:
-                        progress = total_value_s / self.current_character.star_waiting_goal.target_value
+                        earned_income_all += int(goal.total_income * progress)
+                    elif goal.target_duration > 0:
+                        # For pure duration goal, progress based on duration
+                        _, total_duration_all, _ = self.current_character.calculate_totals(activity_type)
+                        progress = total_duration_all / goal.target_duration if goal.target_duration > 0 else 1.0
                         progress = min(progress, 1.0)
-                        earned_income = int(self.current_character.star_waiting_goal.total_income * progress)
-            stats_labels['income_progress'].setText(f"{earned_income:,} / {total_income:,}")
+                        earned_income_all += int(goal.total_income * progress)
+        if total_income_all > 0:
+            stats_labels['income_progress'].setText(f"{earned_income_all:,} / {total_income_all:,}")
         else:
             stats_labels['income_progress'].setText("0 / 0")
 
-        # Update progress
-        progress_value, progress_duration = self.current_character.calculate_progress(activity_type)
-        progress_bars = self._progress_bars[activity_type]
-        value_progress, value_label = progress_bars['value']
-        duration_progress, duration_label = progress_bars['duration']
-
-        if progress_value is not None:
-            value_progress.setValue(int(progress_value * 100))
-            value_label.setText(f"{value_name}: {progress_value * 100:.2f}%")
-        else:
-            value_progress.setValue(0)
-            value_label.setText(f"{value_name}: 未设置目标")
-
-        if progress_duration is not None:
-            duration_progress.setValue(int(progress_duration * 100))
-            duration_label.setText(f"时长: {progress_duration * 100:.2f}%")
-        else:
-            duration_progress.setValue(0)
-            duration_label.setText(f"时长: 未设置目标")
+        # Rebuild progress group with updated data
+        progress_group = self._progress_groups.get(activity_type)
+        if progress_group:
+            self._rebuild_progress_group(progress_group, activity_type)
 
         # Update table
         table = self._tables[activity_type]
@@ -471,33 +534,94 @@ class ActivityFrame(QWidget):
         if not self.current_character:
             QMessageBox.information(self, "提示", "请先在左侧选择一个角色")
             return
-        current_goal = (
-            self.current_character.grinding_goal
-            if activity_type == ActivityType.GRINDING
-            else self.current_character.star_waiting_goal
-        )
-        dialog = SetGoalDialog(self, activity_type, current_goal)
-        dialog.goal_set.connect(self._on_set_goal_done)
-        dialog.exec()
 
-    def _on_set_goal_done(self, activity_type: ActivityType, target_value, target_duration, total_income):
-        """Callback after setting goal"""
+        # Ask user if they want to add a new goal or edit existing one
+        goals = (
+            self.current_character.grinding_goals
+            if activity_type == ActivityType.GRINDING
+            else self.current_character.star_waiting_goals
+        )
+
+        if not goals:
+            # No existing goals, create new one
+            dialog = SetGoalDialog(self, activity_type, None)
+            dialog.goal_set.connect(lambda t, tv, td, ti: self._on_add_goal_done(activity_type, tv, td, ti))
+            dialog.exec()
+        else:
+            # Show dialog to choose - add new or edit existing
+            from PySide6.QtWidgets import QInputDialog
+            items = []
+            for i, g in enumerate(goals):
+                desc = f"目标 #{i+1}: "
+                if g.target_value > 0 and g.target_duration > 0:
+                    desc += f"值{g.target_value}, 时长{g.target_duration}, 收入{g.total_income}"
+                elif g.target_value > 0:
+                    desc += f"值{g.target_value}, 收入{g.total_income}"
+                elif g.target_duration > 0:
+                    desc += f"时长{g.target_duration}, 收入{g.total_income}"
+                items.append(desc)
+            items.append("+ 添加新目标")
+
+            choice, ok = QInputDialog.getItem(
+                self, "选择目标", f"当前已有 {len(goals)} 个目标，请选择要编辑的目标:", items, 0, False
+            )
+            if not ok:
+                return
+
+            if choice == items[-1]:
+                # Add new goal
+                dialog = SetGoalDialog(self, activity_type, None)
+                dialog.goal_set.connect(lambda t, tv, td, ti: self._on_add_goal_done(activity_type, tv, td, ti))
+                dialog.exec()
+            else:
+                # Edit existing
+                index = items.index(choice)
+                dialog = SetGoalDialog(self, activity_type, goals[index])
+                dialog.goal_set.connect(lambda t, tv, td, ti: self._on_edit_goal_done(activity_type, index, tv, td, ti))
+                dialog.exec()
+
+    def _on_add_goal_done(self, activity_type: ActivityType, target_value, target_duration, total_income):
+        """Callback after adding a new goal"""
         if not self.current_character:
             return
         if target_value <= 0 and target_duration <= 0:
-            goal = None
-        else:
-            goal = ActivityGoal(
-                activity_type=activity_type,
-                target_value=target_value,
-                target_duration=target_duration,
-                total_income=total_income
-            )
+            QMessageBox.warning(self, "提示", "数值和时长不能同时为零")
+            return
+
+        goal = ActivityGoal(
+            activity_type=activity_type,
+            target_value=target_value,
+            target_duration=target_duration,
+            total_income=total_income
+        )
 
         if activity_type == ActivityType.GRINDING:
-            self.current_character.grinding_goal = goal
+            self.current_character.grinding_goals.append(goal)
         else:
-            self.current_character.star_waiting_goal = goal
+            self.current_character.star_waiting_goals.append(goal)
+
+        self.update_display(activity_type)
+        self.save_data()
+
+    def _on_edit_goal_done(self, activity_type: ActivityType, index: int, target_value, target_duration, total_income):
+        """Callback after editing an existing goal"""
+        if not self.current_character:
+            return
+        if target_value <= 0 and target_duration <= 0:
+            QMessageBox.warning(self, "提示", "数值和时长不能同时为零")
+            return
+
+        goal = ActivityGoal(
+            activity_type=activity_type,
+            target_value=target_value,
+            target_duration=target_duration,
+            total_income=total_income
+        )
+
+        if activity_type == ActivityType.GRINDING:
+            self.current_character.grinding_goals[index] = goal
+        else:
+            self.current_character.star_waiting_goals[index] = goal
 
         self.update_display(activity_type)
         self.save_data()
@@ -557,7 +681,7 @@ class ActivityFrame(QWidget):
 
         # Check if any character has goals set
         has_any_goal = any(
-            char.grinding_goal or char.star_waiting_goal
+            char.grinding_goals or char.star_waiting_goals
             for char in self.characters
         )
         if not has_any_goal:
@@ -915,16 +1039,20 @@ class SuggestionResultDialog(QDialog):
         if suggestion.estimated_total_income > 0:
             total_remaining_duration = 0
             if suggestion.daily_grinding_minutes > 0:
-                grinding_total_remaining = sum(
-                    max(0, char.grinding_goal.target_duration - char.calculate_totals(ActivityType.GRINDING)[1])
-                    for char in characters if char.grinding_goal
-                )
+                grinding_total_remaining = 0
+                for char in characters:
+                    for goal in char.grinding_goals:
+                        if goal.target_duration > 0:
+                            _, total_duration, _ = char.calculate_totals(ActivityType.GRINDING)
+                            grinding_total_remaining += max(0, goal.target_duration - total_duration)
                 total_remaining_duration += grinding_total_remaining
             if suggestion.daily_star_waiting_minutes > 0:
-                star_total_remaining = sum(
-                    max(0, char.star_waiting_goal.target_duration - char.calculate_totals(ActivityType.STAR_WAITING)[1])
-                    for char in characters if char.star_waiting_goal
-                )
+                star_total_remaining = 0
+                for char in characters:
+                    for goal in char.star_waiting_goals:
+                        if goal.target_duration > 0:
+                            _, total_duration, _ = char.calculate_totals(ActivityType.STAR_WAITING)
+                            star_total_remaining += max(0, goal.target_duration - total_duration)
                 total_remaining_duration += star_total_remaining
 
             if total_remaining_duration > 0:
@@ -1011,12 +1139,9 @@ class SetGoalDialog(QDialog):
         self.setFixedSize(380, 320)
         self.setModal(True)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        layout = QVBoxLayout(content)
+        layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(20, 20, 20, 20)
 
         layout.addWidget(QLabel(f"目标{value_name}"))
         self.value_edit = QLineEdit()
@@ -1074,11 +1199,6 @@ class SetGoalDialog(QDialog):
 
         btn_layout.setAlignment(Qt.AlignCenter)
         layout.addLayout(btn_layout)
-
-        scroll.setWidget(content)
-        main_layout = QVBoxLayout(self)
-        main_layout.addWidget(scroll)
-        self.setLayout(main_layout)
 
     def _parse_int(self, text: str) -> int:
         """Extract only digits from input, supports both half-width and full-width digits"""
