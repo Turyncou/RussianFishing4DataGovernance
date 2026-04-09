@@ -119,10 +119,11 @@ class MainWindow(QMainWindow):
     def __init__(self, data_dir: str):
         super().__init__()
         # Enable true transparency for the entire window
-        # This allows seeing through the window to what's behind
+        # This allows seeing through the window to what's behind when custom background is set
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         # Remove window frame border for completely frameless window
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        # Base background
         self.setStyleSheet("QMainWindow { background-color: rgba(0, 0, 0, 0); }");
         self.data_dir = data_dir
         self._frame_cache = {}
@@ -804,11 +805,22 @@ class MainWindow(QMainWindow):
 
     def _create_main_ui(self):
         """Create the main UI after loading"""
+        # Create central widget - subclass that ensures background is painted
+        class CentralWidget(QWidget):
+            """Custom central widget that always paints a tiny alpha background to prevent click-through"""
+            def paintEvent(self, event):
+                from PySide6.QtGui import QPainter, QColor
+                painter = QPainter(self)
+                # Fill with 2% opacity black - completely invisible visually
+                # But guarantees all pixels have alpha > 0, so Windows won't click through
+                painter.fillRect(self.rect(), QColor(0, 0, 0, 5))
+                super().paintEvent(event)
+
         # Create central widget and main layout
-        self.central_widget = QWidget()
+        self.central_widget = CentralWidget()
         self.central_widget.setAutoFillBackground(False)
         self.central_widget.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.central_widget.setStyleSheet("QWidget { background-color: rgba(0, 0, 0, 0); }")
+        self.central_widget.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         self.setCentralWidget(self.central_widget)
 
         # Add drop shadow effect to the entire window for better visual separation
@@ -826,6 +838,7 @@ class MainWindow(QMainWindow):
         self.nav_bar = QFrame()
         self.nav_bar.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0); border-radius: 12px; }")
         self.nav_bar.setFixedHeight(60)
+        self.nav_bar.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         nav_layout = QHBoxLayout(self.nav_bar)
         nav_layout.setContentsMargins(10, 10, 10, 10)
 
@@ -943,15 +956,20 @@ class MainWindow(QMainWindow):
         if self._background_image_path and os.path.exists(self._background_image_path):
             self._update_background()
 
-        # Content area - scrollable, fully transparent
+        # Content area - scrollable, with tiny alpha to prevent click-through
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.NoFrame)
         self.scroll_area.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.scroll_area.setStyleSheet("QScrollArea { background-color: rgba(0, 0, 0, 0); }")
+        # Tiny alpha to prevent click-through on Windows
+        self.scroll_area.setStyleSheet("QScrollArea { background-color: rgba(0, 0, 0, 2); }")
+        self.scroll_area.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         self.content_container = QWidget()
         self.content_container.setAttribute(Qt.WA_TranslucentBackground, True)
+        # Tiny alpha to prevent click-through
+        self.content_container.setStyleSheet("QWidget { background-color: rgba(0, 0, 0, 0); }")
         self.content_container.setAutoFillBackground(False)
+        self.content_container.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         self.content_layout = QVBoxLayout(self.content_container)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_area.setWidget(self.content_container)
@@ -959,7 +977,9 @@ class MainWindow(QMainWindow):
 
         # Bottom bar for backup and friend links
         self.bottom_bar = QFrame()
-        self.bottom_bar.setStyleSheet("QFrame { background-color: transparent; }")
+        # Tiny alpha to prevent click-through on Windows
+        self.bottom_bar.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 2); }")
+        self.bottom_bar.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         bottom_layout = QHBoxLayout(self.bottom_bar)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -1314,8 +1334,23 @@ class MainWindow(QMainWindow):
             self._background_label = None
 
         if not self._background_image_path or not os.path.exists(self._background_image_path):
-            # No background image, leave window fully transparent
-            # central_widget is already transparent, nothing more to do
+            # No background image - create an opaque-in-hit-test layer covering everything
+            # This must block click-through on Windows, which requires any alpha > 0
+            from PySide6.QtGui import QPalette, QColor
+            self._background_label = QLabel(self.central_widget)
+            self._background_label.resize(self.central_widget.size())
+            # Use QPalette to set background - more reliable than stylesheet
+            palette = self._background_label.palette()
+            # Alpha=5 (~2%) - completely invisible visually but alpha > 0
+            palette.setBrush(QPalette.Window, QBrush(QColor(0, 0, 0, 5)))
+            self._background_label.setPalette(palette)
+            self._background_label.setAutoFillBackground(True)
+            # Absolutely critical: do NOT allow mouse to pass through this widget
+            self._background_label.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+            self._background_label.setAttribute(Qt.WA_OpaquePaintEvent, False)
+            # Send to absolute bottom so it's behind everything else
+            self._background_label.lower()
+            self._background_label.show()
             return
 
         from PySide6.QtGui import QPainter, QColor
@@ -1363,7 +1398,8 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         """Handle window resize to update background scaling"""
         super().resizeEvent(event)
-        if self._background_label and self._background_image_path:
+        if self._background_label:
+            # Always update background - even when no image to keep size correct
             self._update_background()
 
     def _get_resize_direction(self, pos):
