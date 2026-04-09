@@ -1119,6 +1119,15 @@ class MainWindow(QMainWindow):
         grid.addWidget(task_btn, 3, 0)
         self._home_buttons.append(task_btn)
 
+        # Row 4
+        multi_btn = QPushButton("🚀\n多开启动")
+        multi_btn.setFont(button_font)
+        multi_btn.setMinimumSize(button_size)
+        multi_btn.setStyleSheet(button_style)
+        multi_btn.clicked.connect(self.show_multi_launcher)
+        grid.addWidget(multi_btn, 3, 1)
+        self._home_buttons.append(multi_btn)
+
         # Make rows expand
         for i in range(4):
             grid.setRowStretch(i, 1)
@@ -1270,6 +1279,26 @@ class MainWindow(QMainWindow):
         self.content_layout.addWidget(frame)
         frame.show()
         self.current_widget = frame
+
+    def show_multi_launcher(self):
+        """Open multiple instances launcher dialog"""
+        try:
+            from .multi_launcher import MultiLauncherDialog
+            # Use non-modal dialog so main window can still be moved/dragged
+            self._multi_dialog = MultiLauncherDialog(self)
+            self._multi_dialog.show()
+        except ImportError as e:
+            QMessageBox.warning(
+                self,
+                "缺少依赖",
+                f"多开功能需要安装额外依赖:\n{str(e)}\n\n请运行:\npip install psutil pywin32"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "启动失败",
+                f"多开启动器启动失败:\n{str(e)}"
+            )
 
     def open_friend_links(self):
         """Open friend links dialog"""

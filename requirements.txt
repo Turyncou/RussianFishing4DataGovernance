@@ -10,3 +10,5 @@ CTkMessagebox>=2.0
 cryptography>=41.0
 openpyxl>=3.1
 matplotlib>=3.8.0
+psutil>=5.9.0
+pywin32>=306
