@@ -23,7 +23,7 @@ from .suggestion_calculator import calculate_suggestion_for_all
 class ActivityFrame(QWidget):
     """Activity statistics frame - supports both grinding and star waiting"""
 
-    def __init__(self, persistence: ActivityPersistence):
+    def __init__(self, persistence: ActivityPersistence, show_income_info: bool = False):
         super().__init__()
         self.persistence = persistence
         self.characters: List[ActivityCharacter] = []
@@ -35,6 +35,8 @@ class ActivityFrame(QWidget):
             ActivityType.GRINDING: ("日期", True),
             ActivityType.STAR_WAITING: ("日期", True),
         }
+        # Whether to show income information - controlled by main window app settings
+        self._show_income_info = show_income_info
 
         self._stats_labels = {}
         self._progress_groups = {}  # Store progress group widget per activity type
@@ -153,7 +155,6 @@ class ActivityFrame(QWidget):
                 (f"总计获得银币", "total_value", "0"),
                 ("总计搬砖时长", "total_duration", "0分钟"),
                 (remaining_value_name, "remaining_value", "0"),
-                ("已获得收入/总收入", "income_progress", "0 / 0"),
             ]
         else:
             stats = [
@@ -162,8 +163,14 @@ class ActivityFrame(QWidget):
                 (f"总计蹲星成功数量", "total_value", "0"),
                 ("总计蹲星时长", "total_duration", "0分钟"),
                 (remaining_value_name, "remaining_value", "0"),
-                ("已获得收入/总收入", "income_progress", "0 / 0"),
             ]
+
+        # Only add income row if enabled in settings
+        if self._show_income_info:
+            if activity_type == ActivityType.GRINDING:
+                stats.append(("已获得收入/总收入", "income_progress", "0 / 0"))
+            else:
+                stats.append(("已获得收入/总收入", "income_progress", "0 / 0"))
 
         if activity_type not in self._stats_labels:
             self._stats_labels[activity_type] = {}
@@ -203,7 +210,7 @@ class ActivityFrame(QWidget):
         if activity_type == ActivityType.GRINDING:
             columns = ["日期", "银币", "时长(分钟)"]
         else:
-            columns = ["日期", "成功数量", "时长(分钟)"]
+            columns = ["日期", "成功鱼种", "时长(分钟)"]
 
         table = QTableWidget()
         table.setColumnCount(len(columns))
@@ -282,6 +289,7 @@ class ActivityFrame(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setMinimumHeight(200)
+        scroll.setMaximumHeight(400)  # Limit maximum height, becomes scrollable when exceeds
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setSpacing(10)
@@ -304,49 +312,55 @@ class ActivityFrame(QWidget):
             scroll_layout.addWidget(label)
         else:
             for i, goal in enumerate(goals):
-                goal_group = QGroupBox(f"目标 #{i+1}")
+                # For each goal, use current_progress stored in the goal itself for named fish targets
+                # This ensures each fish target tracks its own progress correctly
+                if activity_type == ActivityType.GRINDING:
+                    goal_total_value = total_value
+                    goal_total_duration = total_duration
+                elif goal.fish_name is not None:
+                    # For named fish target: current progress is stored in the goal itself
+                    goal_total_value = goal.current_progress
+                    # Duration is still total across all sessions
+                    goal_total_duration = total_duration
+                else:
+                    # Unnamed star goal: same as before
+                    goal_total_value = total_value
+                    goal_total_duration = total_duration
+
+                title = f"目标 #{i+1}"
+                if goal.fish_name:
+                    title = f"{goal.fish_name} - 目标 #{i+1}"
+                goal_group = QGroupBox(title)
                 goal_layout = QVBoxLayout(goal_group)
                 goal_layout.setSpacing(8)
                 goal_layout.setContentsMargins(10, 5, 10, 8)
 
                 # Value progress (only if target_value > 0)
                 if goal.target_value > 0:
-                    progress_value_pct = (total_value / goal.target_value * 100) if goal.target_value > 0 else 100
+                    progress_value_pct = (goal_total_value / goal.target_value * 100) if goal.target_value > 0 else 100
                     progress_value_pct = min(progress_value_pct, 100)
                     value_progress = QProgressBar()
                     value_progress.setRange(0, 100)
                     value_progress.setValue(int(progress_value_pct))
                     value_progress.setTextVisible(False)
                     goal_layout.addWidget(value_progress)
-                    vname = "银币" if activity_type == ActivityType.GRINDING else "成功数量"
-                    value_label = QLabel(f"{vname}: {progress_value_pct:.1f}% - {total_value:,} / {goal.target_value:,}")
+                    vname = "银币" if activity_type == ActivityType.GRINDING else "已捕获"
+                    value_label = QLabel(f"{vname}: {progress_value_pct:.1f}% - {goal_total_value:,} / {goal.target_value:,}")
                     value_label.setFont(QFont("Segoe UI", 12))
                     goal_layout.addWidget(value_label)
 
                 # Duration progress (only if target_duration > 0)
                 if goal.target_duration > 0:
-                    progress_duration_pct = (total_duration / goal.target_duration * 100) if goal.target_duration > 0 else 100
+                    progress_duration_pct = (goal_total_duration / goal.target_duration * 100) if goal.target_duration > 0 else 100
                     progress_duration_pct = min(progress_duration_pct, 100)
                     duration_progress = QProgressBar()
                     duration_progress.setRange(0, 100)
                     duration_progress.setValue(int(progress_duration_pct))
                     duration_progress.setTextVisible(False)
                     goal_layout.addWidget(duration_progress)
-                    duration_label = QLabel(f"时长: {progress_duration_pct:.1f}% - {total_duration} / {goal.target_duration} 分钟")
+                    duration_label = QLabel(f"时长: {progress_duration_pct:.1f}% - {goal_total_duration} / {goal.target_duration} 分钟")
                     duration_label.setFont(QFont("Segoe UI", 12))
                     goal_layout.addWidget(duration_label)
-
-                # Income display
-                if goal.total_income > 0:
-                    progress_value_pct = (total_value / goal.target_value * 100) if goal.target_value > 0 else 100
-                    progress_value_pct = min(progress_value_pct, 100)
-                    progress_duration_pct = (total_duration / goal.target_duration * 100) if goal.target_duration > 0 else 100
-                    progress_duration_pct = min(progress_duration_pct, 100)
-                    progress = min(progress_value_pct / 100, progress_duration_pct / 100)
-                    earned_income = int(goal.total_income * progress)
-                    remaining_income = goal.total_income - earned_income
-                    income_label = QLabel(f"已获得收入: {earned_income:,} / {goal.total_income:,}  |  剩余收入: {remaining_income:,}")
-                    goal_layout.addWidget(income_label)
 
                 scroll_layout.addWidget(goal_group)
                 self._progress_bars[activity_type].append(
@@ -410,6 +424,70 @@ class ActivityFrame(QWidget):
         self.update_display(ActivityType.GRINDING)
         self.update_display(ActivityType.STAR_WAITING)
 
+    def _rebuild_stats_group(self, activity_type: ActivityType, stats_group: QGroupBox):
+        """Rebuild stats group when show_income_info setting changes"""
+        # Clear existing layout
+        existing_layout = stats_group.layout()
+        if existing_layout:
+            # Remove all widgets from layout
+            while existing_layout.count():
+                item = existing_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+
+        # Create layout if it doesn't exist
+        if existing_layout is None:
+            stats_layout = QGridLayout(stats_group)
+        else:
+            stats_layout = existing_layout
+
+        stats_layout.setSpacing(15)
+        stats_layout.setContentsMargins(15, 15, 15, 10)
+
+        value_name = "银币" if activity_type == ActivityType.GRINDING else "蹲星成功数量"
+        full_value_name = "今日获得银币" if activity_type == ActivityType.GRINDING else "今日蹲星成功数量"
+        remaining_value_name = "剩余目标银币" if activity_type == ActivityType.GRINDING else "剩余蹲星成功数量"
+
+        if activity_type == ActivityType.GRINDING:
+            stats = [
+                (full_value_name, "today_value", "0"),
+                ("今日搬砖时长", "today_duration", "0分钟"),
+                (f"总计获得银币", "total_value", "0"),
+                ("总计搬砖时长", "total_duration", "0分钟"),
+                (remaining_value_name, "remaining_value", "0"),
+            ]
+        else:
+            stats = [
+                (full_value_name, "today_value", "0"),
+                ("今日蹲星时长", "today_duration", "0分钟"),
+                (f"总计蹲星成功数量", "total_value", "0"),
+                ("总计蹲星时长", "total_duration", "0分钟"),
+                (remaining_value_name, "remaining_value", "0"),
+            ]
+
+        # Only add income row if enabled in settings
+        if self._show_income_info:
+            stats.append(("已获得收入/总收入", "income_progress", "0 / 0"))
+
+        self._stats_labels[activity_type] = {}
+
+        for i, (label_text, key, default) in enumerate(stats):
+            row = i // 3
+            col = i % 3
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(10, 10, 10, 10)
+            label_title = QLabel(label_text)
+            label_title.setFont(QFont("Segoe UI", 14))
+            label_title.setAlignment(Qt.AlignCenter)
+            container_layout.addWidget(label_title)
+            label_value = QLabel(default)
+            label_value.setFont(QFont("Segoe UI", 16, QFont.Bold))
+            label_value.setAlignment(Qt.AlignCenter)
+            container_layout.addWidget(label_value)
+            stats_layout.addWidget(container, row, col)
+            self._stats_labels[activity_type][key] = label_value
+
     def update_display(self, activity_type: ActivityType):
         """Update the display with current character data"""
         if not self.current_character:
@@ -419,6 +497,24 @@ class ActivityFrame(QWidget):
         total_value, total_duration, remaining_value = self.current_character.calculate_totals(activity_type)
         today_value, today_duration = self.current_character.calculate_today_totals(activity_type)
 
+        # Check if income row needs to be added/removed - we need to rebuild stats group
+        stats_labels = self._stats_labels[activity_type]
+        has_income_now = 'income_progress' in stats_labels
+        should_have_income = self._show_income_info
+
+        # Get the parent stats group by traversing the widget hierarchy
+        # The stats_labels contains our labels, find the parent group box
+        # Since we know 'today_value' always exists, get its parent
+        if has_income_now != should_have_income and 'today_value' in stats_labels:
+            today_value_label = stats_labels['today_value']
+            parent_container = today_value_label.parent()
+            if parent_container:
+                grandparent = parent_container.parentWidget()
+                if grandparent and isinstance(grandparent, QGroupBox):
+                    # Rebuild the entire stats group with the new setting
+                    self._rebuild_stats_group(activity_type, grandparent)
+                    stats_labels = self._stats_labels[activity_type]
+
         # Update stats
         stats_labels = self._stats_labels[activity_type]
         stats_labels['today_value'].setText(f"{today_value:,}")
@@ -427,32 +523,33 @@ class ActivityFrame(QWidget):
         stats_labels['total_duration'].setText(f"{total_duration}分钟")
         stats_labels['remaining_value'].setText(f"{remaining_value:,}")
 
-        # Calculate income progress - sum across all goals
-        goals = (
-            self.current_character.grinding_goals
-            if activity_type == ActivityType.GRINDING
-            else self.current_character.star_waiting_goals
-        )
-        total_income_all = sum(goal.total_income for goal in goals)
-        earned_income_all = 0
-        if goals:
-            total_value_all, _, _ = self.current_character.calculate_totals(activity_type)
-            for goal in goals:
-                if goal.total_income > 0:
-                    if goal.target_value > 0:
-                        progress = total_value_all / goal.target_value if goal.target_value > 0 else 1.0
-                        progress = min(progress, 1.0)
-                        earned_income_all += int(goal.total_income * progress)
-                    elif goal.target_duration > 0:
-                        # For pure duration goal, progress based on duration
-                        _, total_duration_all, _ = self.current_character.calculate_totals(activity_type)
-                        progress = total_duration_all / goal.target_duration if goal.target_duration > 0 else 1.0
-                        progress = min(progress, 1.0)
-                        earned_income_all += int(goal.total_income * progress)
-        if total_income_all > 0:
-            stats_labels['income_progress'].setText(f"{earned_income_all:,} / {total_income_all:,}")
-        else:
-            stats_labels['income_progress'].setText("0 / 0")
+        # Calculate income progress - sum across all goals, only if enabled
+        if self._show_income_info and 'income_progress' in stats_labels:
+            goals = (
+                self.current_character.grinding_goals
+                if activity_type == ActivityType.GRINDING
+                else self.current_character.star_waiting_goals
+            )
+            total_income_all = sum(goal.total_income for goal in goals)
+            earned_income_all = 0
+            if goals:
+                total_value_all, _, _ = self.current_character.calculate_totals(activity_type)
+                for goal in goals:
+                    if goal.total_income > 0:
+                        if goal.target_value > 0:
+                            progress = total_value_all / goal.target_value if goal.target_value > 0 else 1.0
+                            progress = min(progress, 1.0)
+                            earned_income_all += int(goal.total_income * progress)
+                        elif goal.target_duration > 0:
+                            # For pure duration goal, progress based on duration
+                            _, total_duration_all, _ = self.current_character.calculate_totals(activity_type)
+                            progress = total_duration_all / goal.target_duration if goal.target_duration > 0 else 1.0
+                            progress = min(progress, 1.0)
+                            earned_income_all += int(goal.total_income * progress)
+            if total_income_all > 0:
+                stats_labels['income_progress'].setText(f"{earned_income_all:,} / {total_income_all:,}")
+            else:
+                stats_labels['income_progress'].setText("0 / 0")
 
         # Rebuild progress group with updated data
         progress_group = self._progress_groups.get(activity_type)
@@ -474,7 +571,7 @@ class ActivityFrame(QWidget):
         sort_col, sort_asc = self._sort_state[activity_type]
         if sort_col == "日期":
             key_func = lambda r: r.date
-        elif sort_col == "银币" or sort_col == "成功数量":
+        elif sort_col == "银币" or sort_col == "成功数量" or sort_col == "成功鱼种":
             if activity_type == ActivityType.GRINDING:
                 key_func = lambda r: r.silver_count
             else:
@@ -491,11 +588,16 @@ class ActivityFrame(QWidget):
         for record in records:
             if activity_type == ActivityType.GRINDING:
                 value = record.silver_count
+                display_text = f"{value:,}"
             else:
-                value = record.success_count
+                # For star waiting: if caught_fish exists, display fish names; otherwise show empty
+                if record.caught_fish:
+                    display_text = ", ".join(record.caught_fish)
+                else:
+                    display_text = ""
             table.insertRow(row)
             table.setItem(row, 0, QTableWidgetItem(record.date.strftime("%Y-%m-%d")))
-            table.setItem(row, 1, QTableWidgetItem(f"{value:,}"))
+            table.setItem(row, 1, QTableWidgetItem(display_text))
             table.setItem(row, 2, QTableWidgetItem(str(record.duration_minutes)))
             row += 1
 
@@ -544,8 +646,8 @@ class ActivityFrame(QWidget):
 
         if not goals:
             # No existing goals, create new one
-            dialog = SetGoalDialog(self, activity_type, None)
-            dialog.goal_set.connect(lambda t, tv, td, ti: self._on_add_goal_done(activity_type, tv, td, ti))
+            dialog = SetGoalDialog(self, activity_type, None, self.persistence.data_dir)
+            dialog.goal_set.connect(lambda t, tv, td, ti, fn: self._on_add_goal_done(activity_type, tv, td, ti, fn))
             dialog.exec()
         else:
             # Show dialog to choose - add new or edit existing
@@ -553,6 +655,8 @@ class ActivityFrame(QWidget):
             items = []
             for i, g in enumerate(goals):
                 desc = f"目标 #{i+1}: "
+                if g.fish_name:
+                    desc += f"{g.fish_name} - "
                 if g.target_value > 0 and g.target_duration > 0:
                     desc += f"值{g.target_value}, 时长{g.target_duration}, 收入{g.total_income}"
                 elif g.target_value > 0:
@@ -570,17 +674,17 @@ class ActivityFrame(QWidget):
 
             if choice == items[-1]:
                 # Add new goal
-                dialog = SetGoalDialog(self, activity_type, None)
-                dialog.goal_set.connect(lambda t, tv, td, ti: self._on_add_goal_done(activity_type, tv, td, ti))
+                dialog = SetGoalDialog(self, activity_type, None, self.persistence.data_dir)
+                dialog.goal_set.connect(lambda t, tv, td, ti, fn: self._on_add_goal_done(activity_type, tv, td, ti, fn))
                 dialog.exec()
             else:
                 # Edit existing
                 index = items.index(choice)
-                dialog = SetGoalDialog(self, activity_type, goals[index])
-                dialog.goal_set.connect(lambda t, tv, td, ti: self._on_edit_goal_done(activity_type, index, tv, td, ti))
+                dialog = SetGoalDialog(self, activity_type, goals[index], self.persistence.data_dir)
+                dialog.goal_set.connect(lambda t, tv, td, ti, fn: self._on_edit_goal_done(activity_type, index, tv, td, ti, fn))
                 dialog.exec()
 
-    def _on_add_goal_done(self, activity_type: ActivityType, target_value, target_duration, total_income):
+    def _on_add_goal_done(self, activity_type: ActivityType, target_value, target_duration, total_income, fish_name):
         """Callback after adding a new goal"""
         if not self.current_character:
             return
@@ -592,7 +696,8 @@ class ActivityFrame(QWidget):
             activity_type=activity_type,
             target_value=target_value,
             target_duration=target_duration,
-            total_income=total_income
+            total_income=total_income,
+            fish_name=fish_name
         )
 
         if activity_type == ActivityType.GRINDING:
@@ -603,7 +708,7 @@ class ActivityFrame(QWidget):
         self.update_display(activity_type)
         self.save_data()
 
-    def _on_edit_goal_done(self, activity_type: ActivityType, index: int, target_value, target_duration, total_income):
+    def _on_edit_goal_done(self, activity_type: ActivityType, index: int, target_value, target_duration, total_income, fish_name):
         """Callback after editing an existing goal"""
         if not self.current_character:
             return
@@ -615,7 +720,8 @@ class ActivityFrame(QWidget):
             activity_type=activity_type,
             target_value=target_value,
             target_duration=target_duration,
-            total_income=total_income
+            total_income=total_income,
+            fish_name=fish_name
         )
 
         if activity_type == ActivityType.GRINDING:
@@ -631,7 +737,7 @@ class ActivityFrame(QWidget):
         if self.current_character is None:
             QMessageBox.information(self, "提示", "请先在左侧选择一个角色")
             return
-        dialog = AddRecordDialog(self, activity_type)
+        dialog = AddRecordDialog(self, activity_type, self.current_character)
         dialog.record_added.connect(self._on_add_record_done)
         dialog.exec()
 
@@ -642,23 +748,57 @@ class ActivityFrame(QWidget):
             if not char:
                 QMessageBox.information(self, "提示", "请先在左侧选择一个角色")
                 return
+
+            imported_count = 0
+            today = date.today()
+
             if activity_type == ActivityType.GRINDING:
-                record = ActivityRecord(
-                    date=date.today(),
-                    activity_type=activity_type,
-                    silver_count=value,
-                    duration_minutes=duration_minutes
-                )
+                # Grinding: allow multiple records per day
+                if value > 0 or duration_minutes > 0:
+                    record = ActivityRecord(
+                        date=today,
+                        activity_type=activity_type,
+                        silver_count=value,
+                        duration_minutes=duration_minutes
+                    )
+                    char.add_record(record)
+                    imported_count += 1
             else:
-                record = ActivityRecord(
-                    date=date.today(),
-                    activity_type=activity_type,
-                    success_count=value,
-                    duration_minutes=duration_minutes
-                )
-            char.add_record(record)
+                # Star waiting: each checked fish gets +1 progress on its goal
+                # Add one record for the total duration of this session
+                # success_count = number of fish caught in this session
+                # Allow multiple records per day (user may add multiple times a day
+                success_count = len(value) if isinstance(value, list) else value
+                caught_fish = value if isinstance(value, list) else []
+                if duration_minutes > 0 or len(caught_fish) > 0:
+                    record = ActivityRecord(
+                        date=today,
+                        activity_type=activity_type,
+                        success_count=success_count,
+                        duration_minutes=duration_minutes,
+                        caught_fish=caught_fish
+                    )
+                    char.add_record(record)
+                    imported_count += 1
+
+                    # Increment current_progress for each checked fish goal
+                    if isinstance(value, list):
+                        for fish_name in value:
+                            # Find the goal with this fish name and increment progress
+                            for goal in char.star_waiting_goals:
+                                if goal.fish_name == fish_name and goal.current_progress < goal.target_value:
+                                    goal.current_progress += 1
+
             self.update_display(activity_type)
             self.save_data()
+
+            if imported_count > 0 or (isinstance(value, list) and value):
+                msg = ""
+                if imported_count > 0:
+                    msg += f"成功添加 {imported_count} 条记录\n"
+                if isinstance(value, list) and value:
+                    msg += f"已更新 {len(value)} 个鱼种目标进度"
+                QMessageBox.information(self, "添加成功", msg.strip())
         except Exception as e:
             QMessageBox.warning(self, "添加记录失败", f"错误: {str(e)}")
 
@@ -749,15 +889,26 @@ class ActivityFrame(QWidget):
                 if activity_type == ActivityType.GRINDING:
                     writer.writerow(['日期', '银币', '时长(分钟)'])
                 else:
-                    writer.writerow(['日期', '成功数量', '时长(分钟)'])
+                    writer.writerow(['日期', '成功鱼种', '时长(分钟)'])
                 for record in self.current_character.records:
                     if record.activity_type == activity_type:
-                        value = record.silver_count if activity_type == ActivityType.GRINDING else record.success_count
-                        writer.writerow([
-                            record.date.strftime('%Y-%m-%d'),
-                            value,
-                            record.duration_minutes
-                        ])
+                        if activity_type == ActivityType.GRINDING:
+                            value = record.silver_count
+                            writer.writerow([
+                                record.date.strftime('%Y-%m-%d'),
+                                value,
+                                record.duration_minutes
+                            ])
+                        else:
+                            if record.caught_fish:
+                                fish_text = ", ".join(record.caught_fish)
+                            else:
+                                fish_text = ""
+                            writer.writerow([
+                                record.date.strftime('%Y-%m-%d'),
+                                fish_text,
+                                record.duration_minutes
+                            ])
             count = sum(1 for r in self.current_character.records if r.activity_type == activity_type)
             QMessageBox.information(self, "成功", f"已导出 {count} 条记录到\n{file_path}")
         except Exception as e:
@@ -1128,25 +1279,55 @@ class AddCharacterDialog(QDialog):
 class SetGoalDialog(QDialog):
     """Dialog to set activity goal"""
 
-    goal_set = Signal(object, object, object, object)
+    goal_set = Signal(object, object, object, object, object)
 
-    def __init__(self, parent, activity_type: ActivityType, current_goal: Optional[ActivityGoal], parent_widget=None):
+    def __init__(self, parent, activity_type: ActivityType, current_goal: Optional[ActivityGoal], data_dir: str, parent_widget=None):
         super().__init__(parent or parent_widget)
         self.activity_type = activity_type
+        self.data_dir = data_dir
         value_name = "银币数量" if activity_type == ActivityType.GRINDING else "成功数量"
 
-        self.setWindowTitle("设置目标")
-        self.setFixedSize(380, 320)
+        # Load fish names if we have them
+        self.fish_names = self._load_fish_names()
+
+        # Adjust dialog size based on whether we have fish selection
+        if activity_type == ActivityType.STAR_WAITING and self.fish_names:
+            self.setFixedSize(400, 400)
+        else:
+            self.setFixedSize(380, 320)
         self.setModal(True)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
         layout.setContentsMargins(20, 20, 20, 20)
 
+        # For star waiting with fish names available, add fish selection
+        if self.activity_type == ActivityType.STAR_WAITING and self.fish_names:
+            from PySide6.QtWidgets import QComboBox
+            layout.addWidget(QLabel("目标鱼种"))
+            self.fish_combo = QComboBox()
+            self.fish_combo.addItem("(不指定鱼种)", None)
+            for fish in self.fish_names:
+                self.fish_combo.addItem(fish, fish)
+            # Select current fish if exists
+            if current_goal and current_goal.fish_name:
+                index = self.fish_combo.findData(current_goal.fish_name)
+                if index >= 0:
+                    self.fish_combo.setCurrentIndex(index)
+            # When fish selection changes, update value input
+            self.fish_combo.currentIndexChanged.connect(self._on_fish_changed)
+            layout.addWidget(self.fish_combo)
+            layout.addSpacing(5)
+
         layout.addWidget(QLabel(f"目标{value_name}"))
         self.value_edit = QLineEdit()
         if current_goal:
             self.value_edit.setText(str(current_goal.target_value))
+        elif self.activity_type == ActivityType.STAR_WAITING and hasattr(self, 'fish_combo'):
+            # For star waiting with fish selected, default to 1 since each fish needs only one success
+            if self.fish_combo.currentData() is not None:
+                self.value_edit.setText("1")
+                self.value_edit.setEnabled(False)
         layout.addWidget(self.value_edit)
 
         layout.addWidget(QLabel("目标时长(分钟)"))
@@ -1160,6 +1341,13 @@ class SetGoalDialog(QDialog):
         if current_goal:
             self.income_edit.setText(str(current_goal.total_income))
         layout.addWidget(self.income_edit)
+
+        # Add note if no fish data
+        if self.activity_type == ActivityType.STAR_WAITING and not self.fish_names:
+            note = QLabel("💡 提示：点击主界面底部\"同步鱼种\"可从官网获取鱼种列表")
+            note.setStyleSheet("color: #888888; font-size: 11px;")
+            note.setWordWrap(True)
+            layout.addWidget(note)
 
         layout.addStretch()
 
@@ -1200,6 +1388,36 @@ class SetGoalDialog(QDialog):
         btn_layout.setAlignment(Qt.AlignCenter)
         layout.addLayout(btn_layout)
 
+    def _on_fish_changed(self):
+        """Called when fish selection changes"""
+        if not hasattr(self, 'fish_combo'):
+            return
+        selected_fish = self.fish_combo.currentData()
+        if selected_fish is not None:
+            # Have selected a specific fish, target value is fixed at 1
+            self.value_edit.setText("1")
+            self.value_edit.setEnabled(False)
+        else:
+            # No fish selected, allow editing
+            self.value_edit.clear()
+            self.value_edit.setEnabled(True)
+
+    def _load_fish_names(self) -> list[str]:
+        """Load fish names from fish_names.csv if it exists"""
+        import os
+        csv_path = os.path.join(self.data_dir, 'fish_names.csv')
+        if not os.path.exists(csv_path):
+            return []
+        try:
+            import pandas as pd
+            df = pd.read_csv(csv_path, header=None)
+            fish_names = df[0].dropna().tolist()
+            fish_names = [str(name).strip() for name in fish_names if str(name).strip()]
+            fish_names.sort()
+            return fish_names
+        except Exception:
+            return []
+
     def _parse_int(self, text: str) -> int:
         """Extract only digits from input, supports both half-width and full-width digits"""
         try:
@@ -1228,9 +1446,17 @@ class SetGoalDialog(QDialog):
             target_duration = self._parse_int(self.duration_edit.text())
             total_income = self._parse_int(self.income_edit.text())
 
-            if target_value >= 0 and target_duration >= 0 and total_income >= 0:
-                self.goal_set.emit(self.activity_type, target_value, target_duration, total_income)
+            # Get selected fish name for star waiting
+            fish_name = None
+            if (self.activity_type == ActivityType.STAR_WAITING and
+                hasattr(self, 'fish_combo') and self.fish_combo.currentData() is not None):
+                fish_name = self.fish_combo.currentData()
+
+            if target_value >= 0 and target_duration >= 0 and total_income > 0:
+                self.goal_set.emit(self.activity_type, target_value, target_duration, total_income, fish_name)
                 self.accept()
+            elif total_income <= 0:
+                QMessageBox.warning(self, "输入错误", "每个目标必须填写总收入，总收入必须大于0")
             else:
                 QMessageBox.warning(self, "输入错误", "数值不能为负数，请重新输入")
         except ValueError:
@@ -1238,23 +1464,32 @@ class SetGoalDialog(QDialog):
 
     def clear(self):
         """Clear goal"""
-        self.goal_set.emit(self.activity_type, 0, 0, 0)
+        self.goal_set.emit(self.activity_type, 0, 0, 0, None)
         self.accept()
 
 
 class AddRecordDialog(QDialog):
     """Dialog to add a new activity record"""
 
+    # For grinding: signal (activity_type, silver_value, duration)
+    # For star waiting: signal (activity_type, List[fish_name], duration)
     record_added = Signal(object, object, object)
 
-    def __init__(self, parent, activity_type: ActivityType):
+    def __init__(self, parent, activity_type: ActivityType, current_character: Optional[ActivityCharacter]):
         super().__init__(parent)
         self.activity_type = activity_type
-        value_name = "银币数量" if activity_type == ActivityType.GRINDING else "成功数量"
-        default_value = 1000000 if activity_type == ActivityType.GRINDING else 1
+        self.current_character = current_character
+
+        if activity_type == ActivityType.GRINDING:
+            value_name = "银币数量"
+            default_value = 1000000
+            self.setFixedSize(350, 250)
+        else:
+            value_name = "时长(分钟)"
+            self.setFixedSize(380, 380)
+        default_duration = 120
 
         self.setWindowTitle("添加记录")
-        self.setFixedSize(350, 250)
         self.setModal(True)
 
         scroll = QScrollArea()
@@ -1268,15 +1503,41 @@ class AddRecordDialog(QDialog):
         today_label.setFont(QFont("Segoe UI", 14))
         layout.addWidget(today_label)
 
-        layout.addWidget(QLabel(value_name))
-        self.value_edit = QLineEdit()
-        self.value_edit.setText(str(default_value))
-        layout.addWidget(self.value_edit)
+        # For grinding: show silver value input
+        if activity_type == ActivityType.GRINDING:
+            layout.addWidget(QLabel(value_name))
+            self.value_edit = QLineEdit()
+            self.value_edit.setText(str(default_value))
+            layout.addWidget(self.value_edit)
 
-        layout.addWidget(QLabel("时长(分钟)"))
-        self.duration_edit = QLineEdit()
-        self.duration_edit.setText("120")
-        layout.addWidget(self.duration_edit)
+            layout.addWidget(QLabel("时长(分钟)"))
+            self.duration_edit = QLineEdit()
+            self.duration_edit.setText(str(default_duration))
+            layout.addWidget(self.duration_edit)
+
+        # For star waiting: show checklist of target fish
+        else:
+            layout.addWidget(QLabel("本次成功蹲星鱼种:"))
+            self.fish_checkboxes = []
+            # Get all star waiting goals that have fish name and are not yet completed
+            if current_character:
+                for i, goal in enumerate(current_character.star_waiting_goals):
+                    if goal.fish_name and goal.current_progress < goal.target_value:
+                        from PySide6.QtWidgets import QCheckBox
+                        checkbox = QCheckBox(f"{goal.fish_name}")
+                        layout.addWidget(checkbox)
+                        self.fish_checkboxes.append((goal.fish_name, checkbox))
+
+            if not self.fish_checkboxes:
+                label = QLabel("当前角色没有设置带鱼种的蹲星目标\n先在目标设置中添加鱼种目标")
+                label.setStyleSheet("color: #ff8800;")
+                layout.addWidget(label)
+
+            layout.addSpacing(10)
+            layout.addWidget(QLabel("本次蹲星时长(分钟)"))
+            self.duration_edit = QLineEdit()
+            self.duration_edit.setText(str(default_duration))
+            layout.addWidget(self.duration_edit)
 
         layout.addStretch()
 
@@ -1329,17 +1590,35 @@ class AddRecordDialog(QDialog):
     def confirm(self):
         """Confirm and add record"""
         try:
-            value = self._clean_digits(self.value_edit.text())
             duration = self._clean_digits(self.duration_edit.text())
-            value = max(0, value)
             duration = max(0, duration)
 
-            if value <= 0 and duration <= 0:
-                QMessageBox.warning(self, "输入错误", "数值和时长不能同时为0，请至少输入一项大于0的值")
-                return
+            if self.activity_type == ActivityType.GRINDING:
+                # Grinding: single value input
+                value = self._clean_digits(self.value_edit.text())
+                value = max(0, value)
+                if value <= 0 and duration <= 0:
+                    QMessageBox.warning(self, "输入错误", "数值和时长不能同时为0，请至少输入一项大于0的值")
+                    return
+                self.record_added.emit(self.activity_type, value, duration)
+                self.accept()
+            else:
+                # Star waiting: list of checked fish
+                checked_fish = []
+                for fish_name, checkbox in self.fish_checkboxes:
+                    if checkbox.isChecked():
+                        checked_fish.append(fish_name)
 
-            self.record_added.emit(self.activity_type, value, duration)
-            self.accept()
+                # Allow: either has checked fish, or duration > 0 (for pure duration-based records)
+                if not checked_fish and duration <= 0:
+                    QMessageBox.warning(self, "输入错误", "请至少选择一个本次成功的鱼种，或输入蹲星时长（纯时长记录）")
+                    return
+
+                if duration < 0:
+                    duration = 0
+
+                self.record_added.emit(self.activity_type, checked_fish, duration)
+                self.accept()
         except Exception as e:
             QMessageBox.warning(self, "添加记录失败", f"错误: {str(e)}")
 

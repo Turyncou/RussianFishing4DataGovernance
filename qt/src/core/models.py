@@ -33,8 +33,11 @@ class ActivityRecord:
     duration_minutes: int  # Duration in minutes
     # For grinding: silver_count = silver, duration_minutes = duration
     # For star waiting: success_count = number of successful star fish, duration_minutes = duration
+    # When specific fish targets are used: success_count = number of fish caught in this session
+    # caught_fish: list of fish names caught in this session (for multiple target support)
     silver_count: int = 0  # Number of silver coins (grinding)
     success_count: int = 0  # Number of successful star fish (star waiting)
+    caught_fish: list[str] = field(default_factory=list)  # List of fish names caught in this session
 
     def __post_init__(self):
         if self.silver_count < 0:
@@ -52,6 +55,8 @@ class ActivityGoal:
     target_value: int  # target silver (grinding) or target success count (star waiting)
     target_duration: int  # In minutes
     total_income: int = 0  # Total income when goal is complete
+    fish_name: Optional[str] = None  # Target fish name for star waiting goals
+    current_progress: int = 0  # Current progress (number caught for fish goals)
 
     def __post_init__(self):
         if self.target_value < 0:
@@ -60,6 +65,8 @@ class ActivityGoal:
             raise ValueError("Target duration cannot be negative")
         if self.total_income < 0:
             raise ValueError("Total income cannot be negative")
+        if self.current_progress < 0:
+            raise ValueError("Current progress cannot be negative")
 
 
 class OptimizationAlgorithm(str, Enum):
@@ -186,14 +193,27 @@ class ActivityCharacter:
             total_remaining += int(goal.total_income * remaining_ratio)
         # For all star waiting goals
         for goal in self.star_waiting_goals:
-            total_value, total_duration, _ = self.calculate_totals(ActivityType.STAR_WAITING)
-            # Calculate progress for both value and duration within this goal
-            progress_value = total_value / goal.target_value if goal.target_value > 0 else 1.0
-            progress_duration = total_duration / goal.target_duration if goal.target_duration > 0 else 1.0
-            # Take the minimum progress (maximum remaining)
-            progress = min(progress_value, progress_duration)
-            remaining_ratio = 1.0 - min(progress, 1.0)
-            total_remaining += int(goal.total_income * remaining_ratio)
+            if goal.fish_name is not None:
+                # Fish target: you get the full income when you catch it (current_progress >= target_value)
+                # If you haven't caught it yet, you don't get any income yet
+                # Once caught, you get all the income immediately so 0 remaining
+                if goal.current_progress < goal.target_value:
+                    # Not caught yet - don't count this goal in remaining income estimate
+                    # Because it's uncertain when you'll catch it
+                    continue
+                else:
+                    # Already caught - full income already obtained, no remaining
+                    continue
+            else:
+                # Non-fish target (duration-based): calculate remaining by progress
+                total_value, total_duration, _ = self.calculate_totals(ActivityType.STAR_WAITING)
+                # Calculate progress for both value and duration within this goal
+                progress_value = total_value / goal.target_value if goal.target_value > 0 else 1.0
+                progress_duration = total_duration / goal.target_duration if goal.target_duration > 0 else 1.0
+                # Take the minimum progress (maximum remaining)
+                progress = min(progress_value, progress_duration)
+                remaining_ratio = 1.0 - min(progress, 1.0)
+                total_remaining += int(goal.total_income * remaining_ratio)
         return total_remaining
 
 

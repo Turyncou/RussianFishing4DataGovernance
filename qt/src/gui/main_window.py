@@ -17,7 +17,7 @@ from src.data.persistence import (
     FriendLinkPersistence, CredentialsPersistence, AppSettingsPersistence,
     DailyTaskPersistence, create_auto_backup, list_backups
 )
-from src.core.models import FriendLink
+from src.core.models import FriendLink, ActivityType
 
 
 class LoadingWidget(QWidget):
@@ -159,6 +159,9 @@ class MainWindow(QMainWindow):
 
         # Theme settings
         self._current_theme = "dark"
+
+        # Income display settings
+        self._show_income_info = False
 
         # Daily tasks persistence
         self.daily_task_persistence = None
@@ -649,7 +652,8 @@ class MainWindow(QMainWindow):
             self.app_settings_persistence.save_settings(
                 background_image_path=self._background_image_path,
                 background_opacity=self._background_opacity,
-                theme=self._current_theme
+                theme=self._current_theme,
+                show_income_info=self._show_income_info
             )
 
         # Update background if needed
@@ -762,6 +766,7 @@ class MainWindow(QMainWindow):
             self._background_image_path = settings.get('background_image_path')
             self._background_opacity = settings.get('background_opacity', 0.15)
             self._current_theme = settings.get('theme', 'dark')
+            self._show_income_info = settings.get('show_income_info', False)
 
             # Initialize daily tasks persistence
             self.daily_task_persistence = DailyTaskPersistence(os.path.join(self.data_dir, 'daily_tasks.json'))
@@ -863,17 +868,11 @@ class MainWindow(QMainWindow):
 
         nav_layout.addStretch()
 
-        # Theme toggle button
-        self.theme_btn = QPushButton("🌓 主题")
-        self.theme_btn.setFixedWidth(80)
-        self.theme_btn.clicked.connect(self._toggle_theme)
-        nav_layout.addWidget(self.theme_btn)
-
-        # Background settings button
-        bg_btn = QPushButton("🖼️ 背景")
-        bg_btn.setFixedWidth(80)
-        bg_btn.clicked.connect(self.open_background_settings)
-        nav_layout.addWidget(bg_btn)
+        # App settings button - contains theme, background, and all other settings
+        self.settings_btn = QPushButton("⚙ 设置")
+        self.settings_btn.setFixedWidth(80)
+        self.settings_btn.clicked.connect(self.open_app_settings)
+        nav_layout.addWidget(self.settings_btn)
 
         # Window always on top toggle button
         self.topmost_btn = QPushButton("📌")
@@ -988,6 +987,12 @@ class MainWindow(QMainWindow):
         backup_button.setFixedWidth(120)
         backup_button.clicked.connect(self.open_backup_dialog)
         bottom_layout.addWidget(backup_button)
+
+        # Sync fish data button
+        self.sync_button = QPushButton("🔄 同步鱼种")
+        self.sync_button.setFixedWidth(120)
+        self.sync_button.clicked.connect(self.start_fish_sync)
+        bottom_layout.addWidget(self.sync_button)
 
         bottom_layout.addStretch()
 
@@ -1159,9 +1164,14 @@ class MainWindow(QMainWindow):
         cache_key = "activity_stats"
         if cache_key in self._frame_cache:
             frame = self._frame_cache[cache_key]
+            frame._show_income_info = self._show_income_info
+            # Refresh both tabs to apply setting
+            if frame.current_character:
+                frame.update_display(ActivityType.GRINDING)
+                frame.update_display(ActivityType.STAR_WAITING)
             frame.update_data()
         else:
-            frame = ActivityFrame(self.activity_persistence)
+            frame = ActivityFrame(self.activity_persistence, self._show_income_info)
             self._frame_cache[cache_key] = frame
 
         self.content_layout.addWidget(frame)
@@ -1331,25 +1341,48 @@ class MainWindow(QMainWindow):
             self._frame_cache["daily_tasks"].save_data()
         event.accept()
 
-    def open_background_settings(self):
-        """Open background settings dialog"""
-        from .dialogs.background_settings_dialog import BackgroundSettingsDialog
-        dialog = BackgroundSettingsDialog(self, self._background_image_path, self._background_opacity)
-        dialog.settings_changed.connect(self._on_background_settings_changed)
+    def open_app_settings(self):
+        """Open application settings dialog"""
+        from .dialogs.app_settings_dialog import AppSettingsDialog
+        dialog = AppSettingsDialog(
+            self,
+            self._background_image_path,
+            self._background_opacity,
+            self._current_theme,
+            self._show_income_info
+        )
+        dialog.settings_changed.connect(self._on_app_settings_changed)
         dialog.exec()
 
-    def _on_background_settings_changed(self, image_path: str, opacity: float):
-        """Callback when background settings are changed"""
+    def _on_app_settings_changed(self, image_path: str, opacity: float, theme: str, show_income: bool):
+        """Callback when application settings are changed"""
         self._background_image_path = image_path
         self._background_opacity = opacity
+        self._current_theme = theme
+        self._show_income_info = show_income
+
+        # Update theme if it changed
+        self._apply_current_theme()
+
+        # Update activity frame to reflect setting change
+        if "activity_stats" in self._frame_cache:
+            self._frame_cache["activity_stats"]._show_income_info = show_income
+            # Refresh display for both tabs
+            if self._frame_cache["activity_stats"].current_character:
+                self._frame_cache["activity_stats"].update_display(ActivityType.GRINDING)
+                self._frame_cache["activity_stats"].update_display(ActivityType.STAR_WAITING)
 
         # Save settings
         if self.app_settings_persistence:
             self.app_settings_persistence.save_settings(
                 background_image_path=self._background_image_path,
                 background_opacity=self._background_opacity,
-                theme=self._current_theme
+                theme=self._current_theme,
+                show_income_info=self._show_income_info
             )
+
+        # Update background display
+        self._update_background()
 
         # Update background display
         self._update_background()
@@ -1579,3 +1612,22 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             super().mouseDoubleClickEvent(event)
+
+    def start_fish_sync(self):
+        """Start syncing fish data from official website"""
+        try:
+            from ..core.fish_sync import FishSyncDialog
+            dialog = FishSyncDialog(self, self.data_dir)
+            dialog.exec()
+        except ImportError as e:
+            QMessageBox.warning(
+                self,
+                "缺少依赖",
+                f"数据同步功能需要安装额外依赖:\n{str(e)}\n\n请运行:\ncd qt\npip install lxml pandas"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "启动失败",
+                f"数据同步启动失败:\n{str(e)}"
+            )

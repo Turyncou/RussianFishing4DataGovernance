@@ -422,35 +422,65 @@ def generate_recommendation(
     total_grinding_remaining_duration = 0
     for char in characters:
         for goal in char.grinding_goals:
+            # For grinding goals: only include if target_duration > 0
+            # Grinding goals don't have fish names so no exclusion needed
             if goal.target_duration > 0:
-                _, total_duration, _ = char.calculate_totals(ActivityType.GRINDING)
+                # Check if this goal is already completed by value
+                if goal.current_progress >= goal.target_value:
+                    # Value already completed, no more duration needed for this goal
+                    continue
+                # Calculate total duration so far
+                total_duration = 0
+                for r in char.records:
+                    if r.activity_type == ActivityType.GRINDING:
+                        total_duration += r.duration_minutes
                 total_grinding_remaining_duration += max(0, goal.target_duration - total_duration)
 
     total_star_remaining_duration = 0
     for char in characters:
         for goal in char.star_waiting_goals:
+            # If this is a fish target (has fish_name), NEVER include it in recommendation
+            # Fish targets are uncertain, don't allocate time for them in advance
+            if goal.fish_name is not None:
+                continue
+            # Only include non-fish targets (duration-based) that still need duration
             if goal.target_duration > 0:
-                _, total_duration, _ = char.calculate_totals(ActivityType.STAR_WAITING)
+                if goal.current_progress >= goal.target_value:
+                    # Already completed by value, no more duration needed
+                    continue
+                # Calculate total duration so far
+                total_duration = 0
+                for r in char.records:
+                    if r.activity_type == ActivityType.STAR_WAITING:
+                        total_duration += r.duration_minutes
                 total_star_remaining_duration += max(0, goal.target_duration - total_duration)
 
-    # Filter characters that have remaining work
+    # Calculate total remaining value and filter active characters
+    total_remaining_value = 0
     active_characters = []
     for char in characters:
-        has_remaining = False
+        char_has_remaining = False
+        char_remaining_value = 0
         # Check all grinding goals
         for goal in char.grinding_goals:
-            _, _, remaining_value = char.calculate_totals(ActivityType.GRINDING)
-            if remaining_value > 0:
-                has_remaining = True
-                break
+            # Check if goal has remaining value
+            if goal.current_progress < goal.target_value:
+                remaining = (goal.target_value - goal.current_progress)
+                char_remaining_value += remaining
+                # Still need duration if target_duration > 0
+                char_has_remaining = True
         # Check all star waiting goals
-        if not has_remaining:
-            for goal in char.star_waiting_goals:
-                _, _, remaining_value = char.calculate_totals(ActivityType.STAR_WAITING)
-                if remaining_value > 0:
-                    has_remaining = True
-                    break
-        if has_remaining:
+        for goal in char.star_waiting_goals:
+            # Fish name targets are NEVER included in recommendation calculation
+            if goal.fish_name is not None:
+                continue
+            # Only non-fish targets (duration-based) are checked for remaining
+            if goal.current_progress < goal.target_value:
+                remaining = (goal.target_value - goal.current_progress)
+                char_remaining_value += remaining
+                # Still need duration if target_duration > 0
+                char_has_remaining = True
+        if char_has_remaining:
             active_characters.append(char)
 
     if active_characters:
@@ -484,18 +514,31 @@ def generate_recommendation(
         total_remaining_capacity = 0.0
 
         for char in active_characters:
-            _, total_g_dur, rem_g_val = char.calculate_totals(ActivityType.GRINDING)
-            _, total_s_dur, rem_s_val = char.calculate_totals(ActivityType.STAR_WAITING)
+            # Calculate total duration across all grinding records
+            total_g_dur = 0
+            for r in char.records:
+                if r.activity_type == ActivityType.GRINDING:
+                    total_g_dur += r.duration_minutes
 
-            # Sum remaining duration across all goals
+            # Calculate total duration across all star waiting records
+            total_s_dur = 0
+            for r in char.records:
+                if r.activity_type == ActivityType.STAR_WAITING:
+                    total_s_dur += r.duration_minutes
+
+            # Sum remaining duration across all incomplete goals
             rem_g = 0.0
             for goal in char.grinding_goals:
-                if goal.target_duration > 0:
+                if goal.target_duration > 0 and goal.current_progress < goal.target_value:
                     rem_g += max(0, goal.target_duration - total_g_dur)
 
             rem_s = 0.0
             for goal in char.star_waiting_goals:
-                if goal.target_duration > 0:
+                # Fish name targets are NEVER included in recommendation calculation
+                if goal.fish_name is not None:
+                    continue
+                # Only non-fish targets (duration-based) are included
+                if goal.target_duration > 0 and goal.current_progress < goal.target_value:
                     rem_s += max(0, goal.target_duration - total_s_dur)
 
             # 每日任务要求

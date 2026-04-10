@@ -92,6 +92,8 @@ class ActivityPersistence(DataPersistence):
 
     def __init__(self, file_path: str):
         super().__init__(file_path)
+        # Store data directory (contains the file) for loading fish names
+        self.data_dir = os.path.dirname(file_path)
 
     def save_characters(self, characters: List[ActivityCharacter], global_suggestion_settings: SuggestionUserSettings = None) -> None:
         """Save activity characters to file, with global suggestion settings"""
@@ -125,7 +127,8 @@ class ActivityPersistence(DataPersistence):
                         'activity_type': r.activity_type.value,
                         'silver_count': r.silver_count,
                         'success_count': r.success_count,
-                        'duration_minutes': r.duration_minutes
+                        'duration_minutes': r.duration_minutes,
+                        'caught_fish': r.caught_fish
                     }
                     for r in char.records
                 ],
@@ -135,7 +138,9 @@ class ActivityPersistence(DataPersistence):
                         'activity_type': goal.activity_type.value,
                         'target_value': goal.target_value,
                         'target_duration': goal.target_duration,
-                        'total_income': goal.total_income
+                        'total_income': goal.total_income,
+                        'fish_name': goal.fish_name,
+                        'current_progress': goal.current_progress
                     }
                     for goal in char.grinding_goals
                 ] if char.grinding_goals else None,
@@ -144,7 +149,9 @@ class ActivityPersistence(DataPersistence):
                         'activity_type': goal.activity_type.value,
                         'target_value': goal.target_value,
                         'target_duration': goal.target_duration,
-                        'total_income': goal.total_income
+                        'total_income': goal.total_income,
+                        'fish_name': goal.fish_name,
+                        'current_progress': goal.current_progress
                     }
                     for goal in char.star_waiting_goals
                 ] if char.star_waiting_goals else None,
@@ -153,13 +160,17 @@ class ActivityPersistence(DataPersistence):
                     'activity_type': char.grinding_goal.activity_type.value,
                     'target_value': char.grinding_goal.target_value,
                     'target_duration': char.grinding_goal.target_duration,
-                    'total_income': char.grinding_goal.total_income
+                    'total_income': char.grinding_goal.total_income,
+                    'fish_name': char.grinding_goal.fish_name,
+                    'current_progress': char.grinding_goal.current_progress
                 } if char.grinding_goal else None,
                 'star_waiting_goal': {
                     'activity_type': char.star_waiting_goal.activity_type.value,
                     'target_value': char.star_waiting_goal.target_value,
                     'target_duration': char.star_waiting_goal.target_duration,
-                    'total_income': char.star_waiting_goal.total_income
+                    'total_income': char.star_waiting_goal.total_income,
+                    'fish_name': char.star_waiting_goal.fish_name,
+                    'current_progress': char.star_waiting_goal.current_progress
                 } if char.star_waiting_goal else None,
                 # Keep per-character settings for backward compatibility
                 'suggestion_settings': {
@@ -230,7 +241,9 @@ class ActivityPersistence(DataPersistence):
                                 activity_type=ActivityType.GRINDING,
                                 target_value=goal_data.get('target_value', 0),
                                 target_duration=goal_data.get('target_duration', 0),
-                                total_income=goal_data.get('total_income', 0)
+                                total_income=goal_data.get('total_income', 0),
+                                fish_name=goal_data.get('fish_name'),
+                                current_progress=goal_data.get('current_progress', 0)
                             ))
                 else:
                     # Backward compatibility: single goal
@@ -240,7 +253,9 @@ class ActivityPersistence(DataPersistence):
                             activity_type=ActivityType.GRINDING,
                             target_value=grinding_goal_data.get('target_value', 0),
                             target_duration=grinding_goal_data.get('target_duration', 0),
-                            total_income=grinding_goal_data.get('total_income', 0)
+                            total_income=grinding_goal_data.get('total_income', 0),
+                            fish_name=grinding_goal_data.get('fish_name'),
+                            current_progress=grinding_goal_data.get('current_progress', 0)
                         ))
 
                 # Star waiting goals
@@ -252,7 +267,9 @@ class ActivityPersistence(DataPersistence):
                                 activity_type=ActivityType.STAR_WAITING,
                                 target_value=goal_data.get('target_value', 0),
                                 target_duration=goal_data.get('target_duration', 0),
-                                total_income=goal_data.get('total_income', 0)
+                                total_income=goal_data.get('total_income', 0),
+                                fish_name=goal_data.get('fish_name'),
+                                current_progress=goal_data.get('current_progress', 0)
                             ))
                 else:
                     # Backward compatibility: single goal
@@ -262,7 +279,9 @@ class ActivityPersistence(DataPersistence):
                             activity_type=ActivityType.STAR_WAITING,
                             target_value=star_waiting_goal_data.get('target_value', 0),
                             target_duration=star_waiting_goal_data.get('target_duration', 0),
-                            total_income=star_waiting_goal_data.get('total_income', 0)
+                            total_income=star_waiting_goal_data.get('total_income', 0),
+                            fish_name=star_waiting_goal_data.get('fish_name'),
+                            current_progress=star_waiting_goal_data.get('current_progress', 0)
                         ))
 
                 # Load suggestion settings
@@ -293,7 +312,8 @@ class ActivityPersistence(DataPersistence):
                             activity_type=activity_type,
                             silver_count=record_data.get('silver_count', 0),
                             success_count=record_data.get('success_count', 0),
-                            duration_minutes=record_data.get('duration_minutes', 0)
+                            duration_minutes=record_data.get('duration_minutes', 0),
+                            caught_fish=record_data.get('caught_fish', [])
                         )
                         char.add_record(record)
                 characters.append(char)
@@ -563,12 +583,13 @@ class AppSettingsPersistence(DataPersistence):
     def __init__(self, file_path: str):
         super().__init__(file_path)
 
-    def save_settings(self, background_image_path: str = None, background_opacity: float = 0.15, theme: str = "dark") -> None:
+    def save_settings(self, background_image_path: str = None, background_opacity: float = 0.15, theme: str = "dark", show_income_info: bool = False) -> None:
         """Save application settings"""
         data = {
             'background_image_path': background_image_path if background_image_path else None,
             'background_opacity': background_opacity,
             'theme': theme,
+            'show_income_info': show_income_info,
         }
         self.save(data)
 
@@ -580,6 +601,7 @@ class AppSettingsPersistence(DataPersistence):
                 'background_image_path': None,
                 'background_opacity': 0.15,
                 'theme': 'dark',
+                'show_income_info': False,
             }
 
         try:
@@ -587,12 +609,14 @@ class AppSettingsPersistence(DataPersistence):
                 'background_image_path': data.get('background_image_path', None),
                 'background_opacity': float(data.get('background_opacity', 0.15)),
                 'theme': data.get('theme', 'dark'),
+                'show_income_info': data.get('show_income_info', False),
             }
         except (KeyError, ValueError):
             return {
                 'background_image_path': None,
                 'background_opacity': 0.15,
                 'theme': 'dark',
+                'show_income_info': False,
             }
 
 

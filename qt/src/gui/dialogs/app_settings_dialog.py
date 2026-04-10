@@ -1,23 +1,28 @@
-"""Background settings dialog - select background image and adjust opacity"""
+"""Application settings dialog - general settings including theme and background"""
 import os
 import shutil
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSlider, QLineEdit, QFileDialog, QCheckBox
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
+    QSlider, QLineEdit, QFileDialog
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
 
-class BackgroundSettingsDialog(QDialog):
-    """Dialog for setting background image and adjusting opacity"""
+class AppSettingsDialog(QDialog):
+    """Application settings dialog for all app settings"""
 
-    settings_changed = Signal(str, float)  # (image_path, opacity)
+    settings_changed = Signal(str, float, str, bool)
+    # (background_image_path, background_opacity, theme, show_income_info)
 
-    def __init__(self, parent=None, current_path: str = None, current_opacity: float = 0.15):
+    def __init__(self, parent=None,
+                 current_path: str = None,
+                 current_opacity: float = 0.15,
+                 current_theme: str = "dark",
+                 current_show_income: bool = False):
         super().__init__(parent)
-        self.setWindowTitle("背景设置")
-        self.resize(500, 250)
+        self.setWindowTitle("应用设置")
+        self.resize(500, 420)
         self.setModal(True)
 
         self.selected_image_path = current_path
@@ -30,7 +35,17 @@ class BackgroundSettingsDialog(QDialog):
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        # Current image path
+        # Theme selection
+        theme_layout = QHBoxLayout()
+        theme_layout.addWidget(QLabel("主题:"))
+        self.dark_checkbox = QCheckBox("深色主题")
+        self.dark_checkbox.setChecked(current_theme == "dark")
+        self.dark_checkbox.clicked.connect(self._on_theme_changed)
+        theme_layout.addWidget(self.dark_checkbox)
+        theme_layout.addStretch()
+        layout.addLayout(theme_layout)
+
+        # Background image path
         path_layout = QHBoxLayout()
         path_layout.addWidget(QLabel("背景图片:"))
         self.path_edit = QLineEdit()
@@ -47,42 +62,61 @@ class BackgroundSettingsDialog(QDialog):
 
         # Opacity slider
         opacity_layout = QHBoxLayout()
-        opacity_layout.addWidget(QLabel("透明度:"))
+        opacity_layout.addWidget(QLabel("背景透明度:"))
         self.opacity_slider = QSlider(Qt.Horizontal)
         self.opacity_slider.setRange(0, 100)
         # opacity 0-1 -> slider 0-100
         self.opacity_slider.setValue(int(current_opacity * 100))
-        opacity_layout.addWidget(self.opacity_slider, 1)
         self.opacity_label = QLabel(f"{current_opacity * 100:.0f}%")
         self.opacity_label.setFixedWidth(40)
+        self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
+        opacity_layout.addWidget(self.opacity_slider, 1)
         opacity_layout.addWidget(self.opacity_label)
         layout.addLayout(opacity_layout)
 
-        self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
-
         # Clear background checkbox
-        checkbox_layout = QHBoxLayout()
+        clear_layout = QHBoxLayout()
         self.clear_checkbox = QCheckBox("清除背景图片")
         self.clear_checkbox.setChecked(not current_path)
         self.clear_checkbox.clicked.connect(self._on_clear_clicked)
-        checkbox_layout.addWidget(self.clear_checkbox)
-        layout.addLayout(checkbox_layout)
+        clear_layout.addWidget(self.clear_checkbox)
+        layout.addLayout(clear_layout)
 
-        # Preview label
-        preview_label = QLabel("提示：透明度建议设置 10%-20%，不影响内容阅读")
-        preview_label.setStyleSheet("color: #888888;")
-        layout.addWidget(preview_label)
+        # Show income info checkbox
+        income_layout = QHBoxLayout()
+        self.show_income_checkbox = QCheckBox("显示收入信息")
+        self.show_income_checkbox.setChecked(current_show_income)
+        self.show_income_checkbox.setToolTip(
+            "在活动统计页面显示\"已获得收入/总收入\"\n"
+            "关闭后界面更简洁，保护收入隐私"
+        )
+        income_layout.addWidget(self.show_income_checkbox)
+        layout.addLayout(income_layout)
+
+        # Hint
+        hint_label = QLabel("提示：背景透明度建议设置 10%-20%，不影响内容阅读")
+        hint_label.setStyleSheet("color: #888888;")
+        layout.addWidget(hint_label)
+
+        layout.addStretch()
 
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         save_btn = QPushButton("保存")
+        save_btn.setFixedWidth(80)
         save_btn.clicked.connect(self._save_settings)
         btn_layout.addWidget(save_btn)
         cancel_btn = QPushButton("取消")
+        cancel_btn.setFixedWidth(80)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
+
+    def _on_theme_changed(self):
+        """Update theme checkbox - only one can be selected"""
+        # dark_checkbox checked means dark theme, unchecked means light
+        pass
 
     def _browse_image(self):
         """Open file dialog to select image"""
@@ -114,16 +148,18 @@ class BackgroundSettingsDialog(QDialog):
     def _save_settings(self):
         """Save settings and emit signal"""
         opacity = self.opacity_slider.value() / 100.0
+        theme = "dark" if self.dark_checkbox.isChecked() else "light"
+        show_income = self.show_income_checkbox.isChecked()
 
         if self.clear_checkbox.isChecked():
             # No background
-            self.settings_changed.emit(None, opacity)
+            self.settings_changed.emit(None, opacity, theme, show_income)
             self.accept()
             return
 
         if not self.selected_image_path:
             # Nothing selected
-            self.settings_changed.emit(None, opacity)
+            self.settings_changed.emit(None, opacity, theme, show_income)
             self.accept()
             return
 
@@ -148,5 +184,5 @@ class BackgroundSettingsDialog(QDialog):
                 # If copy fails, just keep original path
                 pass
 
-        self.settings_changed.emit(self.selected_image_path, opacity)
+        self.settings_changed.emit(self.selected_image_path, opacity, theme, show_income)
         self.accept()
