@@ -328,447 +328,436 @@ class ScreenRecorder(QObject):
             print("Please install: pip install pyaudio sounddevice soundfile")
             return
 
-        sample_rate = 44100
+        # Unified recording architecture using sounddevice for BOTH mic and system
+        # This allows:
+        # 1. Separate devices for mic and system - both recorded and mixed
+        # 2. Automatic filtering of silent devices
+        # 3. Automatic volume normalization
+        # 4. Save audio FIRST before closing streams - avoids hanging
+        # 5. Same reliability for both mic and system
 
-        if self.record_mic and not self.record_system:
-            # Only microphone with pyaudio, support dynamic toggling
-            try:
-                import pyaudio
-                chunk_size = 1024
-                p = pyaudio.PyAudio()
+        try:
+            import sounddevice as sd
+            import soundfile as sf
+            import numpy as np
 
-                # Get default input device info
-                info = p.get_default_input_device_info()
-                print(f"Recording microphone from default device: {info.get('name')}")
+            # Query all devices
+            print(f"Scanning for input devices...")
+            device_list = sd.query_devices()
 
-                stream = p.open(
-                    format=pyaudio.paInt16,
-                    channels=1,
-                    rate=sample_rate,
-                    input=True,
-                    frames_per_buffer=chunk_size
-                )
-
-                audio_frames = []
-                while self.is_recording:
-                    if self.record_mic:
-                        # Mic enabled, read actual data
-                        data = stream.read(chunk_size, exception_on_overflow=False)
-                        audio_frames.append(data)
-                    else:
-                        # Mic disabled, write silence
-                        silence = b'\x00' * (2 * chunk_size)  # 16-bit = 2 bytes per sample
-                        audio_frames.append(silence)
-                        time.sleep(chunk_size / sample_rate)
-
-                stream.stop_stream()
-                stream.close()
-                p.terminate()
-
-                # Save as WAV
-                if audio_frames:
-                    wf = wave.open(output_path, 'wb')
-                    wf.setnchannels(1)
-                    wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
-                    wf.setframerate(sample_rate)
-                    wf.writeframes(b''.join(audio_frames))
-                    wf.close()
-                    print(f"Microphone recording saved: {output_path} ({len(audio_frames)} frames)")
-            except Exception as e:
-                print(f"Microphone recording error: {e}")
-                print("Tip: Check that your microphone is connected and enabled")
-
-        elif self.record_system and not self.record_mic:
-            # Use sounddevice to capture system audio from loopback devices
-            # Simpler callback-based approach that avoids memory allocation issues
-            # Automatically finds all input devices including Stereo Mix / What U Hear / VB-Cable / Intelligo VAC etc.
-            try:
-                import sounddevice as sd
-                import soundfile as sf
-                import numpy as np
-
-                # Query all devices
-                print(f"Scanning for input/loopback devices...")
-                device_list = sd.query_devices()
-
-                # Find all available input devices (any device with input channels)
-                # This includes loopback devices like Stereo Mix, VB-Cable, Intelligo VAC, etc.
-                input_devices = []
-                for i, dev in enumerate(device_list):
-                    if dev['max_input_channels'] > 0:
-                        name = dev['name']
-                        channels = dev['max_input_channels']
-                        sample_rate = dev['default_samplerate']
-                        input_devices.append((i, dev))
-                        print(f"  Device {i}: {name} (channels: {channels}, rate: {int(sample_rate)})")
-
-                if not input_devices:
-                    print("Error: No input devices found! System audio recording disabled.")
-                    return
-
-                # Prefer devices that look like loopback devices
-                # Common loopback device names contain keywords
-                loopback_keywords = [
-                    'stereo', 'mix', 'what', 'cable', 'output', 'loopback',
-                    'virtual', 'line', 'vac',
-                    '混音', '捕获', '输出', '虚拟', '捕获'
-                ]
-                # Exclude microphones - we only want system loopback
-                exclude_keywords = [
-                    'mic', 'microphone', '麦克风', '麦克风阵列'
-                ]
-
-                selected_devices = []
-
-                for dev_idx, dev in input_devices:
+            # Find all available input devices (any device with input channels)
+            # We will record from ALL devices that have signal
+            input_devices = []
+            for i, dev in enumerate(device_list):
+                if dev['max_input_channels'] > 0:
                     name = dev['name']
-                    name_lower = name.lower()
+                    channels = dev['max_input_channels']
+                    sample_rate_dev = dev['default_samplerate']
+                    input_devices.append((i, dev))
+                    print(f"  Device {i}: {name} (channels: {channels}, rate: {int(sample_rate_dev)})")
 
-                    # Skip microphones - we don't want them in system audio capture
-                    if any(keyword in name_lower for keyword in exclude_keywords):
-                        continue
+            if not input_devices:
+                print("Error: No input devices found! Audio recording disabled.")
+                return
 
-                    # Check if it matches loopback keywords
-                    is_loopback = any(keyword in name_lower for keyword in loopback_keywords)
+            # Keywords classification:
+            # Classify each device as microphone or loopback (system)
+            # We always open all devices that match either type, because user can toggle during recording
+            # So even if it's disabled at start, toggling it later will work immediately
+            loopback_keywords = [
+                'stereo', 'mix', 'what', 'cable', 'output', 'loopback',
+                'virtual', 'line', 'vac',
+                '混音', '捕获', '输出', '虚拟', '捕获'
+            ]
+            mic_keywords = [
+                'mic', 'microphone', '麦克风', '麦克风阵列',
+            ]
 
-                    # Include if it matches loopback keywords
-                    if is_loopback:
-                        selected_devices.append((dev_idx, dev))
+            selected_devices = []
 
-                # If no devices selected, fall back to all non-microphone input devices
-                if not selected_devices:
-                    print("No explicit loopback device found, falling back to all non-microphone input devices")
+            # Always open ALL devices that match either category
+            # We'll check the toggle when mixing, so toggling during recording works immediately
+            for dev_idx, dev in input_devices:
+                name = dev['name']
+                name_lower = name.lower()
+
+                is_mic_device = any(keyword in name_lower for keyword in mic_keywords)
+                is_loopback_device = any(keyword in name_lower for keyword in loopback_keywords)
+
+                # Include if:
+                # - it's a mic device AND we might record mic (user can toggle during recording)
+                # - it's a loopback device AND we might record system (user can toggle during recording)
+                include = False
+                if is_mic_device:
+                    # Always include mic devices - mic can be toggled on later during recording
+                    include = True
+                if is_loopback_device:
+                    # Always include loopback devices - system can be toggled on later during recording
+                    include = True
+                # If it's neither but we're recording both, still include it might be usable
+                if not include and self.record_mic and self.record_system:
+                    include = True
+
+                if include:
+                    selected_devices.append((dev_idx, dev, is_mic_device, is_loopback_device))
+
+            # If filtering resulted in no devices, fall back
+            if not selected_devices:
+                if self.record_system and not self.record_mic:
+                    print("No explicit loopback device found after filtering, falling back to all non-microphone input devices")
                     for dev_idx, dev in input_devices:
                         name_lower = dev['name'].lower()
-                        if not any(keyword in name_lower for keyword in exclude_keywords):
-                            selected_devices.append((dev_idx, dev))
+                        is_mic_device = any(keyword in name_lower for keyword in mic_keywords)
+                        is_loopback_device = any(keyword in name_lower for keyword in loopback_keywords)
+                        if not is_mic_device:
+                            selected_devices.append((dev_idx, dev, is_mic_device, is_loopback_device))
 
-                # If no loopback device found, just use all input devices
                 if not selected_devices:
-                    print("No explicit loopback device found, trying all input devices")
-                    selected_devices = input_devices
-                else:
-                    print(f"Found {len(selected_devices)} candidate loopback device(s)")
+                    print("No filtered devices found, using all input devices")
+                    # Convert to full 4-element format with classification
+                    full_selected = []
+                    for dev_idx, dev in input_devices:
+                        name_lower = dev['name'].lower()
+                        is_mic_device = any(keyword in name_lower for keyword in mic_keywords)
+                        is_loopback_device = any(keyword in name_lower for keyword in loopback_keywords)
+                        full_selected.append((dev_idx, dev, is_mic_device, is_loopback_device))
+                    selected_devices = full_selected
 
-                # Check if we have any devices after selection
-                if not selected_devices:
-                    print("Error: No candidate devices found!")
-                    return
+            print(f"Found {len(selected_devices)} candidate input device(s) for recording")
 
-                # Check if only "主声音捕获驱动程序" is selected - this is usually useless
-                # Open privacy settings immediately since it's likely a permission issue
-                if len(selected_devices) == 1:
-                    dev_name = selected_devices[0][1]['name']
-                    if '主声音捕获驱动程序' in dev_name:
-                        print("\nNote: Only '主声音捕获驱动程序' was found. This device usually doesn't capture actual audio.")
-                        print("This likely means other loopback devices are blocked by Windows privacy settings.")
-                        print("Opening Windows Microphone Privacy Settings...")
-                        print("\nPlease enable microphone access for this application, then try again.")
-                        try:
-                            import subprocess
-                            subprocess.run(['start', 'ms-settings:privacy-microphone'], shell=True)
-                        except Exception:
-                            pass
+            # Check if we have any devices after selection
+            if not selected_devices:
+                print("Error: No candidate devices found!")
+                return
 
-                # We'll record from all successfully opened devices and mix them
-                # Store (buffer_list, dev_samplerate, name) along with the stream
-                active_streams_data = []
-                sample_rate = 44100  # Common output sample rate
-                channels = 1  # Output mixed to mono
-
-                # Create a callback for each stream that appends to its buffer
-                def create_callback(buffer_list):
-                    def callback(indata, frames, time, status):
-                        if status:
-                            print(status)
-                        if self.record_system and self.is_recording:
-                            # Mix to mono if input is stereo
-                            if indata.shape[1] > 1:
-                                mono = indata.mean(axis=1)
-                            else:
-                                mono = indata.flatten()
-                            buffer_list.append(mono.copy())
-                    return callback
-
-                # Try to open a stream for each candidate device
-                for dev_idx, dev in selected_devices:
-                    max_in_ch = int(dev['max_input_channels'])
-                    dev_channels = min(max_in_ch, 2)  # Use max 2 channels
-                    dev_samplerate = dev['default_samplerate']
-
-                    buffer_list = []
-                    try:
-                        stream = sd.InputStream(
-                            device=dev_idx,
-                            channels=dev_channels,
-                            samplerate=dev_samplerate,
-                            callback=create_callback(buffer_list)
-                        )
-                        active_streams_data.append((stream, buffer_list, dev_samplerate, dev['name']))
-                        print(f"✓ Opened stream for: {dev['name']} ({int(dev_samplerate)}Hz)")
-                    except Exception as e:
-                        print(f"✗ Failed to open device {dev_idx} ({dev['name']}): {e}")
-
-                if not active_streams_data:
-                    print("Error: Could not open any input devices!")
-                    print("\nThis is likely caused by Windows microphone privacy settings blocking access.")
+            # Check if only "主声音捕获驱动程序" is selected - this usually doesn't capture actual audio
+            if len(selected_devices) == 1:
+                dev_name = selected_devices[0][1]['name']
+                if '主声音捕获驱动程序' in dev_name:
+                    print("\nNote: Only '主声音捕获驱动程序' was found. This device usually doesn't capture actual audio.")
+                    print("This likely means other input devices are blocked by Windows privacy settings.")
                     print("Opening Windows Microphone Privacy Settings...")
-                    print("\nPlease enable microphone access in:")
-                    print("   Start → Settings → Privacy → Microphone")
-                    print("\nOr enable Stereo Mix in Windows Sound settings:")
-                    print("   Right-click speaker icon → Sounds → Recording → Enable '立体声混音'")
+                    print("\nPlease enable microphone access for this application, then try again.")
                     try:
                         import subprocess
                         subprocess.run(['start', 'ms-settings:privacy-microphone'], shell=True)
                     except Exception:
                         pass
-                    return
 
-                print(f"Starting system audio capture from {len(active_streams_data)} device(s)...")
-                sys.stdout.flush()
+            # We'll record from all successfully opened devices and mix them
+            # Store (stream, buffer_list, dev_samplerate, name, is_mic, is_loopback) along with the stream
+            active_streams_data = []
+            target_rate = 44100  # Common output sample rate
 
-                # Start all streams
-                for stream, _, _, _ in active_streams_data:
-                    stream.start()
-
-                print(f"Recording...")
-                sys.stdout.flush()
-                # Just wait while recording is active
-                # Check flag very frequently to exit immediately when stopped
-                while self.is_recording:
-                    time.sleep(0.001)  # Check 1000 times per second - exit instantly when stopped
-
-                print(f"Stopping streams...")
-                sys.stdout.flush()
-
-                # 【CRITICAL FIX】First collect ALL audio data we've already captured from buffers
-                # We already have all the data, so DO NOT wait for streams to close
-                # Collect and save the audio FIRST, then close streams in background
-                # This prevents hanging if stream closing blocks indefinitely on Windows
-                print(f"  Collecting audio data from buffers...")
-                sys.stdout.flush()
-
-                # Collect all non-empty recordings NOW before closing anything
-                recordings = []
-                total_samples = 0
-                collected = 0
-                for stream, buffer_list, dev_samplerate, name in active_streams_data:
-                    collected += 1
-                    if not buffer_list or len(buffer_list) == 0:
-                        print(f"    No data from {name}, skipping")
-                        continue
-                    # We already have all the data in memory - just concatenate it
-                    full_rec = np.concatenate(buffer_list, axis=0)
-                    recordings.append((full_rec, dev_samplerate))
-                    total_samples += len(full_rec)
-                    print(f"    Got {len(full_rec)} samples from {name}")
-
-                print(f"  Already got data from {collected} of {len(active_streams_data)} streams")
-                sys.stdout.flush()
-
-                # Now process and save audio immediately while streams are still open
-                # We don't need to close them to use the data we already have!
-                print(f"Processing and saving audio...")
-                sys.stdout.flush()
-
-                try:
-                    if not recordings:
-                        print("Warning: No audio data captured from any device!")
-                        print("\nThis is usually caused by Windows privacy settings blocking microphone access.")
-                        print("Opening Windows Microphone Privacy Settings...")
-                        sys.stdout.flush()
-                        try:
-                            import subprocess
-                            subprocess.run(['start', 'ms-settings:privacy-microphone'], shell=True)
-                        except Exception:
-                            pass
-                        # STILL close streams in background before returning
-                        def cleanup_streams_bg():
-                            for stream, _, _, name in active_streams_data:
-                                try:
-                                    stream.stop()
-                                    stream.close()
-                                except Exception:
-                                    pass
-                        cleanup_thread = threading.Thread(target=cleanup_streams_bg, daemon=True)
-                        cleanup_thread.start()
+            # Create a callback for each stream that appends to its buffer
+            # Supports dynamic toggling during recording:
+            # - When enabled: append actual audio data
+            # - When disabled: append silence of the same length
+            # This ensures audio always has the correct length so sync with video is preserved
+            def create_callback(buffer_list, is_mic_device, is_loopback_device):
+                def callback(indata, frames, time, status):
+                    if status:
+                        print(status)
+                    if not self.is_recording:
                         return
 
-                    # Resample all recordings to target 44100Hz and mix
-                    target_rate = 44100
-                    max_len = 0
-                    resampled = []
-                    print(f"    Target rate: {target_rate}Hz")
-                    sys.stdout.flush()
+                    # Check if this audio type is currently enabled
+                    should_record = False
+                    if is_mic_device and self.record_mic:
+                        should_record = True
+                    if is_loopback_device and self.record_system:
+                        should_record = True
+                    # If neither classification matches but both are enabled, record anyway
+                    if not should_record and self.record_mic and self.record_system:
+                        should_record = True
 
-                    # Keep only recordings that actually have signal (not silent)
-                    # Many devices found by Windows are actually silent input devices
-                    # Filtering them out improves volume a lot
-                    active_recordings = []
-                    for i, (arr, src_rate) in enumerate(recordings):
-                        print(f"    Resampling device {i+1}/{len(recordings)} from {src_rate}Hz...")
-                        sys.stdout.flush()
-                        if src_rate == target_rate:
-                            resampled_arr = arr
-                        else:
-                            # Simple linear resampling
-                            ratio = src_rate / target_rate
-                            new_len = int(len(arr) / ratio)
-                            indices = np.arange(new_len) * ratio
-                            resampled_arr = np.interp(indices, np.arange(len(arr)), arr)
-
-                        # Check if this device actually has audio signal (not all silence)
-                        # If the max absolute value is very low, it's just silence - skip it
-                        if len(resampled_arr) > 0:
-                            max_amp = np.max(np.abs(resampled_arr))
-                            if max_amp < 0.001:
-                                print(f"    Device {i+1} is silent - skipping")
-                                continue
-                            else:
-                                print(f"    Device {i+1} has signal (max amp: {max_amp:.4f})")
-                                active_recordings.append(resampled_arr)
-                                if len(resampled_arr) > max_len:
-                                    max_len = len(resampled_arr)
-                        else:
-                            print(f"    Device {i+1} is empty - skipping")
-
-                    print(f"Final buffer size: {max_len} samples at {target_rate}Hz")
-                    sys.stdout.flush()
-
-                    if not active_recordings:
-                        print("Warning: All devices are silent!")
-                        # Still create silent output rather than failing
-                        mixed = np.zeros(max_len, dtype=np.float64)
+                    # Mix input to mono regardless - we always need same shape
+                    if indata.shape[1] > 1:
+                        mono = indata.mean(axis=1)
                     else:
-                        resampled = active_recordings
-                        print(f"  {len(resampled)} devices with active signal, {len(recordings) - len(resampled)} silent devices skipped")
+                        mono = indata.flatten()
 
-                        # Mix all active recordings
-                        print(f"  Mixing {len(resampled)} active streams...")
-                        sys.stdout.flush()
-                        mixed = np.zeros(max_len, dtype=np.float64)
-                        for arr in resampled:
-                            padded = np.zeros(max_len, dtype=np.float64)
-                            padded[:len(arr)] = arr
-                            mixed += padded
+                    if should_record:
+                        # Enabled - append actual audio
+                        buffer_list.append(mono.copy())
+                    else:
+                        # Disabled - append ZEROS (silence) of the SAME LENGTH
+                        # This keeps audio buffer length matching recording time
+                        # So audio stays synchronized with video even when toggled
+                        silence = np.zeros_like(mono)
+                        buffer_list.append(silence)
+                return callback
 
-                        # Auto-normalize volume to match the loudest device
-                        # This ensures output volume similar to what you get with a single device
-                        peak = np.max(np.abs(mixed))
-                        if peak > 0:
-                            # Normalize to 0.8 peak (leaves some headroom to avoid clipping)
-                            target_peak = 0.8
-                            mixed = mixed * (target_peak / peak)
-                            print(f"  Auto-normalized volume from peak {peak:.4f} to {target_peak:.1f}")
+            # Try to open a stream for each candidate device
+            # We open it even if currently disabled because user can toggle during recording
+            for dev_idx, dev, is_mic_device, is_loopback_device in selected_devices:
+                max_in_ch = int(dev['max_input_channels'])
+                dev_channels = min(max_in_ch, 2)  # Use max 2 channels
+                dev_samplerate = dev['default_samplerate']
 
-                    # Clamp to [-1, 1] to avoid clipping distortion
-                    mixed = np.clip(mixed, -1.0, 1.0)
+                buffer_list = []
+                try:
+                    stream = sd.InputStream(
+                        device=dev_idx,
+                        channels=dev_channels,
+                        samplerate=dev_samplerate,
+                        callback=create_callback(buffer_list, is_mic_device, is_loopback_device)
+                    )
+                    active_streams_data.append((stream, buffer_list, dev_samplerate, dev['name'], is_mic_device, is_loopback_device))
+                    device_type = []
+                    if is_mic_device:
+                        device_type.append("mic")
+                    if is_loopback_device:
+                        device_type.append("system")
+                    print(f"✓ Opened stream for: {dev['name']} ({int(dev_samplerate)}Hz) [{', '.join(device_type)}]")
+                except Exception as e:
+                    print(f"✗ Failed to open device {dev_idx} ({dev['name']}): {e}")
 
-                    # Convert to int16 for WAV
-                    mixed_int16 = (mixed * 32767).astype(np.int16)
+            if not active_streams_data:
+                print("Error: Could not open any input devices!")
+                print("\nThis is likely caused by Windows microphone privacy settings blocking access.")
+                print("Opening Windows Microphone Privacy Settings...")
+                print("\nPlease enable microphone access in:")
+                print("   Start → Settings → Privacy → Microphone")
+                print("\nOr enable Stereo Mix in Windows Sound settings:")
+                print("   Right-click speaker icon → Sounds → Recording → Enable '立体声混音'")
+                try:
+                    import subprocess
+                    subprocess.run(['start', 'ms-settings:privacy-microphone'], shell=True)
+                except Exception:
+                    pass
+                return
 
-                    # Check if completely silent
-                    if np.all(mixed_int16 == 0):
-                        print("Warning: Captured audio is completely silent!")
-                        print("\nThis is usually caused by Windows privacy settings blocking microphone access.")
-                        print("Opening Windows Microphone Privacy Settings...")
-                        try:
-                            import subprocess
-                            subprocess.run(['start', 'ms-settings:privacy-microphone'], shell=True)
-                        except Exception:
-                            pass
-                        # Close streams in background before returning
-                        def cleanup_streams_bg():
-                            for stream, _, _, name in active_streams_data:
-                                try:
-                                    stream.stop()
-                                    stream.close()
-                                except Exception:
-                                    pass
-                        cleanup_thread = threading.Thread(target=cleanup_streams_bg, daemon=True)
-                        cleanup_thread.start()
-                        return
+            print(f"Starting audio capture from {len(active_streams_data)} device(s)...")
+            sys.stdout.flush()
 
-                    # Save as WAV using soundfile - this is what we need for merging
-                    print(f"Saving audio to: {output_path}")
+            # Start all streams
+            for stream, _, _, _, _, _ in active_streams_data:
+                stream.start()
+
+            print(f"Recording...")
+            sys.stdout.flush()
+            # Just wait while recording is active
+            # Check flag very frequently to exit immediately when stopped
+            while self.is_recording:
+                time.sleep(0.001)  # Check 1000 times per second - exit instantly when stopped
+
+            print(f"Stopping streams...")
+            sys.stdout.flush()
+
+            # 【CRITICAL FIX】First collect ALL audio data we've already captured from buffers
+            # We already have all the data, so DO NOT wait for streams to close
+            # Collect and save the audio FIRST, then close streams in background
+            # This prevents hanging if stream closing blocks indefinitely on Windows
+            print(f"  Collecting audio data from buffers...")
+            sys.stdout.flush()
+
+            # Collect all non-empty recordings NOW before closing anything
+            # We already have all the data in memory - just concatenate it
+            # Filter based on CURRENT toggle state from overlay - so dynamic toggling during recording works!
+            recordings = []
+            collected = 0
+            included = 0
+            for stream, buffer_list, dev_samplerate, name, is_mic_device, is_loopback_device in active_streams_data:
+                collected += 1
+                if not buffer_list or len(buffer_list) == 0:
+                    print(f"    No data from {name}, skipping")
+                    continue
+
+                # Check if we should include this device based on current toggle state
+                # This is why dynamic toggling during recording works - we check right here
+                include = False
+                if is_mic_device and self.record_mic:
+                    include = True
+                if is_loopback_device and self.record_system:
+                    include = True
+                # If both mic and system are enabled, include all devices we opened
+                # Some devices might not match our keywords but they could still have usable audio
+                if not include and self.record_mic and self.record_system:
+                    include = True
+
+                if not include:
+                    print(f"    Skipping {name} (currently toggled off)")
+                    continue
+
+                # Include this device - we already have all the data in memory
+                full_rec = np.concatenate(buffer_list, axis=0)
+                recordings.append((full_rec, dev_samplerate))
+                included += 1
+                print(f"    Got {len(full_rec)} samples from {name} (included)")
+
+            print(f"  Collected {included} of {collected} streams (others toggled off)")
+
+            print(f"  Already got data from {collected} of {len(active_streams_data)} streams")
+            sys.stdout.flush()
+
+            # Now process and save audio immediately while streams are still open
+            # We don't need to close them to use the data we already have!
+            print(f"Processing and saving audio...")
+            sys.stdout.flush()
+
+            try:
+                if not recordings:
+                    print("Warning: No audio data captured from any device!")
+                    print("\nThis is usually caused by Windows privacy settings blocking microphone access.")
+                    print("Opening Windows Microphone Privacy Settings...")
                     sys.stdout.flush()
-                    sf.write(output_path, mixed_int16, target_rate, 'PCM_16')
-                    duration = len(mixed_int16) / target_rate
-                    print(f"✓ System audio saved: {output_path}")
-                    print(f"   Duration: {duration:.1f}s, Devices: {len(recordings)}")
-                    print(f"   Audio is preserved as separate WAV file even if merging fails")
-                    sys.stdout.flush()
-
-                    # NOW - after audio is ALREADY saved to disk - close streams in background
-                    # If closing hangs, it doesn't matter because we're done and the thread is daemon
+                    try:
+                        import subprocess
+                        subprocess.run(['start', 'ms-settings:privacy-microphone'], shell=True)
+                    except Exception:
+                        pass
+                    # STILL close streams in background before returning
                     def cleanup_streams_bg():
-                        for stream, _, _, name in active_streams_data:
+                        for stream, _, _, name, _, _ in active_streams_data:
                             try:
                                 stream.stop()
                                 stream.close()
                             except Exception:
-                                # If closing fails, just ignore - we already saved the audio!
+                                pass
+                    cleanup_thread = threading.Thread(target=cleanup_streams_bg, daemon=True)
+                    cleanup_thread.start()
+                    return
+
+                # Resample all recordings to target 44100Hz and mix
+                max_len = 0
+                # Keep only recordings that actually have signal (not silent)
+                # Many devices found by Windows are actually silent input devices
+                # Filtering them out improves volume a lot
+                active_recordings = []
+
+                for i, (arr, src_rate) in enumerate(recordings):
+                    print(f"    Resampling device {i+1}/{len(recordings)} from {src_rate}Hz...")
+                    sys.stdout.flush()
+                    if src_rate == target_rate:
+                        resampled_arr = arr
+                    else:
+                        # Simple linear resampling
+                        ratio = src_rate / target_rate
+                        new_len = int(len(arr) / ratio)
+                        indices = np.arange(new_len) * ratio
+                        resampled_arr = np.interp(indices, np.arange(len(arr)), arr)
+
+                    # Check if this device actually has audio signal (not all silence)
+                    # If the max absolute value is very low, it's just silence - skip it
+                    if len(resampled_arr) > 0:
+                        max_amp = np.max(np.abs(resampled_arr))
+                        if max_amp < 0.001:
+                            print(f"    Device {i+1} is silent - skipping")
+                            continue
+                        else:
+                            print(f"    Device {i+1} has signal (max amp: {max_amp:.4f})")
+                            active_recordings.append(resampled_arr)
+                            if len(resampled_arr) > max_len:
+                                max_len = len(resampled_arr)
+                    else:
+                        print(f"    Device {i+1} is empty - skipping")
+
+                print(f"Final buffer size: {max_len} samples at {target_rate}Hz")
+                sys.stdout.flush()
+
+                if not active_recordings:
+                    print("Warning: All devices are silent!")
+                    # Still create silent output rather than failing
+                    mixed = np.zeros(max_len, dtype=np.float64)
+                else:
+                    resampled = active_recordings
+                    print(f"  {len(resampled)} devices with active signal, {len(recordings) - len(resampled)} silent devices skipped")
+
+                    # Mix all active recordings
+                    print(f"  Mixing {len(resampled)} active streams...")
+                    sys.stdout.flush()
+                    mixed = np.zeros(max_len, dtype=np.float64)
+                    for arr in resampled:
+                        padded = np.zeros(max_len, dtype=np.float64)
+                        padded[:len(arr)] = arr
+                        mixed += padded
+
+                    # Auto-normalize volume to match the peak of the loudest device
+                    # This ensures output volume similar to what you get with a single device
+                    peak = np.max(np.abs(mixed))
+                    if peak > 0:
+                        # Normalize to 0.8 peak (leaves some headroom to avoid clipping)
+                        target_peak = 0.8
+                        mixed = mixed * (target_peak / peak)
+                        print(f"  Auto-normalized volume: peak {peak:.4f} → {target_peak:.1f}")
+
+                # Clamp to [-1, 1] to avoid clipping distortion
+                mixed = np.clip(mixed, -1.0, 1.0)
+
+                # Convert to int16 for WAV
+                mixed_int16 = (mixed * 32767).astype(np.int16)
+
+                # Check if completely silent
+                if np.all(mixed_int16 == 0):
+                    print("Warning: Captured audio is completely silent!")
+                    print("\nThis is usually caused by Windows privacy settings blocking microphone access.")
+                    print("Opening Windows Microphone Privacy Settings...")
+                    try:
+                        import subprocess
+                        subprocess.run(['start', 'ms-settings:privacy-microphone'], shell=True)
+                    except Exception:
+                        pass
+                    # Close streams in background before returning
+                    def cleanup_streams_bg():
+                        for stream, _, _, name, _, _ in active_streams_data:
+                            try:
+                                stream.stop()
+                                stream.close()
+                            except Exception:
+                                pass
+                    cleanup_thread = threading.Thread(target=cleanup_streams_bg, daemon=True)
+                    cleanup_thread.start()
+                    return
+
+                # Save as WAV using soundfile - this is what we need for merging
+                print(f"Saving audio to: {output_path}")
+                sys.stdout.flush()
+                sf.write(output_path, mixed_int16, target_rate, 'PCM_16')
+                duration = len(mixed_int16) / target_rate
+                print(f"✓ Audio saved: {output_path}")
+                if self.record_mic and self.record_system:
+                    print(f"   Duration: {duration:.1f}s, Devices with signal: {len(active_recordings)}/{len(recordings)} (includes mic + system)")
+                elif self.record_mic:
+                    print(f"   Duration: {duration:.1f}s, Devices with signal: {len(active_recordings)}/{len(recordings)} (microphone only)")
+                else:
+                    print(f"   Duration: {duration:.1f}s, Devices with signal: {len(active_recordings)}/{len(recordings)} (system only)")
+                print(f"   Audio is preserved as separate WAV file even if merging fails")
+                sys.stdout.flush()
+
+                # NOW - after audio is ALREADY saved to disk - close streams in background
+                # If closing hangs, it doesn't matter because we're done and the thread is daemon
+                def cleanup_streams_bg():
+                    for stream, _, _, name, _, _ in active_streams_data:
+                        try:
+                            stream.stop()
+                            stream.close()
+                        except Exception:
+                            # If closing fails, just ignore - we already saved the audio!
+                            pass
+                cleanup_thread = threading.Thread(target=cleanup_streams_bg, daemon=True)
+                cleanup_thread.start()
+
+            except Exception as e:
+                print(f"Audio processing error: {e}")
+                # Still close streams in background
+                if 'active_streams_data' in locals():
+                    def cleanup_streams_bg():
+                        for stream, _, _, name, _, _ in active_streams_data:
+                            try:
+                                stream.stop()
+                                stream.close()
+                            except Exception:
                                 pass
                     cleanup_thread = threading.Thread(target=cleanup_streams_bg, daemon=True)
                     cleanup_thread.start()
 
-                except Exception as e:
-                    print(f"Error during audio processing/saving: {e}")
-                    print("Audio will be missing from final recording.")
-                    # Always try to close streams in background
-                    try:
-                        def cleanup_streams_bg():
-                            for stream, _, _, name in active_streams_data:
-                                try:
-                                    stream.stop()
-                                    stream.close()
-                                except Exception:
-                                    pass
-                        cleanup_thread = threading.Thread(target=cleanup_streams_bg, daemon=True)
-                        cleanup_thread.start()
-                    except Exception:
-                        pass
-
-            except ImportError as e:
-                print(f"sounddevice/soundfile not installed: {e}")
-                print("To capture system audio:")
-                print("   pip install sounddevice soundfile")
-            except Exception as e:
-                print(f"System audio capture error: {e}")
-
-        elif self.record_mic and self.record_system:
-            # Both mic and system - this requires proper audio routing
-            # Best way is to have a device that already captures both
-            try:
-                import sounddevice as sd
-                import soundfile as sf
-                import numpy as np
-
-                default_device = sd.default.device[0]
-                device_info = sd.query_devices(default_device)
-                channels = max(2, device_info['max_input_channels'])
-                print(f"Recording both mic + system audio from device: {device_info['name']}")
-                print("Note: This requires a single input device that captures both")
-
-                recording = []
-
-                def callback(indata, frames, time, status):
-                    if status:
-                        print(status)
-                    recording.append(indata.copy())
-                    if not self.is_recording:
-                        return None, sd.CallbackStop
-
-                with sd.InputStream(samplerate=sample_rate, channels=channels, callback=callback):
-                    while self.is_recording:
-                        sd.sleep(100)
-
-                if recording:
-                    full_recording = np.concatenate(recording, axis=0)
-                    sf.write(output_path, full_recording, sample_rate)
-                    print(f"Combined audio recording saved: {output_path}")
-            except Exception as e:
-                print(f"Combined audio recording error: {e}")
+        except ImportError as e:
+            print(f"sounddevice/soundfile not installed: {e}")
+            print("To capture audio:")
+            print("   pip install sounddevice soundfile")
+        except Exception as e:
+            print(f"Audio capture error: {e}")
 
     def stop_recording(self):
         """Stop screen recording - called by hotkey or manual"""
