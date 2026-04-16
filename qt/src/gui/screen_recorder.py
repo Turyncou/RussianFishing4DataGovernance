@@ -553,8 +553,12 @@ class ScreenRecorder(QObject):
             sys.stdout.flush()
 
             # Collect all non-empty recordings NOW before closing anything
-            # We already have all the data in memory - just concatenate it
-            # Filter based on CURRENT toggle state from overlay - so dynamic toggling during recording works!
+            # Dynamic toggling was already handled in the callback:
+            # - When enabled: actual audio is written
+            # - When disabled: silence (zeros) of the same length is written
+            # So we always include every non-empty buffer - it already has the correct
+            # pattern of audio/silence matching the toggling history. This preserves
+            # audio length synchronization with video.
             recordings = []
             collected = 0
             included = 0
@@ -564,31 +568,22 @@ class ScreenRecorder(QObject):
                     print(f"    No data from {name}, skipping")
                     continue
 
-                # Check if we should include this device based on current toggle state
-                # This is why dynamic toggling during recording works - we check right here
-                include = False
-                if is_mic_device and self.record_mic:
-                    include = True
-                if is_loopback_device and self.record_system:
-                    include = True
-                # If both mic and system are enabled, include all devices we opened
-                # Some devices might not match our keywords but they could still have usable audio
-                if not include and self.record_mic and self.record_system:
-                    include = True
-
-                if not include:
-                    print(f"    Skipping {name} (currently toggled off)")
-                    continue
-
-                # Include this device - we already have all the data in memory
+                # Always include - callback already handled the dynamic toggling
+                # Buffer already contains audio when on, silence when off
                 full_rec = np.concatenate(buffer_list, axis=0)
                 recordings.append((full_rec, dev_samplerate))
                 included += 1
-                print(f"    Got {len(full_rec)} samples from {name} (included)")
+                # Show statistics
+                total_samples = len(full_rec)
+                non_zero = np.count_nonzero(full_rec)
+                if non_zero == 0:
+                    print(f"    Got {total_samples} samples from {name} (entirely silent - all toggled off)")
+                else:
+                    pct = 100 * non_zero / total_samples
+                    print(f"    Got {total_samples} samples from {name} ({pct:.0f}% non-silence)")
 
-            print(f"  Collected {included} of {collected} streams (others toggled off)")
-
-            print(f"  Already got data from {collected} of {len(active_streams_data)} streams")
+            print(f"  Collected {included} of {collected} non-empty streams")
+            print(f"  Total: {sum(len(np.concatenate(b)) for _, b, _, _, _, _ in active_streams_data if b)} samples")
             sys.stdout.flush()
 
             # Now process and save audio immediately while streams are still open
