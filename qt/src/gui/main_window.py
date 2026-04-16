@@ -166,6 +166,14 @@ class MainWindow(QMainWindow):
         # Daily tasks persistence
         self.daily_task_persistence = None
 
+        # Screen recorder settings
+        self._screen_recorder = None
+        self._screen_recorder_start_hotkey = "ctrl+shift+r"
+        self._screen_recorder_stop_hotkey = "ctrl+shift+s"
+        self._screen_recorder_save_path = None
+        self._screen_recorder_record_mic = False
+        self._screen_recorder_record_system = False
+
         # Home page navigation buttons (for theme updates)
         self._home_buttons = []
 
@@ -767,6 +775,11 @@ class MainWindow(QMainWindow):
             self._background_opacity = settings.get('background_opacity', 0.15)
             self._current_theme = settings.get('theme', 'dark')
             self._show_income_info = settings.get('show_income_info', False)
+            self._screen_recorder_start_hotkey = settings.get('screen_recorder_start_hotkey', 'ctrl+shift+r')
+            self._screen_recorder_stop_hotkey = settings.get('screen_recorder_stop_hotkey', 'ctrl+shift+s')
+            self._screen_recorder_save_path = settings.get('screen_recorder_save_path', None)
+            self._screen_recorder_record_mic = settings.get('screen_recorder_record_mic', False)
+            self._screen_recorder_record_system = settings.get('screen_recorder_record_system', False)
 
             # Initialize daily tasks persistence
             self.daily_task_persistence = DailyTaskPersistence(os.path.join(self.data_dir, 'daily_tasks.json'))
@@ -807,6 +820,9 @@ class MainWindow(QMainWindow):
         # Update background after central widget is created and layout done
         if self._background_image_path and os.path.exists(self._background_image_path):
             QTimer.singleShot(50, self._update_background)
+
+        # Initialize screen recorder
+        self._init_screen_recorder()
 
     def _create_main_ui(self):
         """Create the main UI after loading"""
@@ -1329,7 +1345,13 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def closeEvent(self, event):
-        """Handle window closing - save all data"""
+        """Handle window closing - save all data and cleanup"""
+        # Cleanup screen recorder
+        if self._screen_recorder:
+            if self._screen_recorder.is_currently_recording():
+                self._screen_recorder.stop_recording()
+            self._screen_recorder.unregister_hotkeys()
+
         # Save data from all cached frames
         if "activity_stats" in self._frame_cache:
             self._frame_cache["activity_stats"].save_data()
@@ -1349,17 +1371,33 @@ class MainWindow(QMainWindow):
             self._background_image_path,
             self._background_opacity,
             self._current_theme,
-            self._show_income_info
+            self._show_income_info,
+            self._screen_recorder_start_hotkey,
+            self._screen_recorder_stop_hotkey,
+            self._screen_recorder_save_path,
+            self._screen_recorder_record_mic,
+            self._screen_recorder_record_system
         )
         dialog.settings_changed.connect(self._on_app_settings_changed)
         dialog.exec()
 
-    def _on_app_settings_changed(self, image_path: str, opacity: float, theme: str, show_income: bool):
+    def _on_app_settings_changed(self, image_path: str, opacity: float, theme: str, show_income: bool,
+                                  start_hotkey: str = None, stop_hotkey: str = None, save_path: str = None,
+                                  record_mic: bool = None, record_system: bool = None):
         """Callback when application settings are changed"""
         self._background_image_path = image_path
         self._background_opacity = opacity
         self._current_theme = theme
         self._show_income_info = show_income
+        if start_hotkey is not None:
+            self._screen_recorder_start_hotkey = start_hotkey
+        if stop_hotkey is not None:
+            self._screen_recorder_stop_hotkey = stop_hotkey
+        self._screen_recorder_save_path = save_path
+        if record_mic is not None:
+            self._screen_recorder_record_mic = record_mic
+        if record_system is not None:
+            self._screen_recorder_record_system = record_system
 
         # Update theme if it changed
         self._apply_current_theme()
@@ -1372,17 +1410,22 @@ class MainWindow(QMainWindow):
                 self._frame_cache["activity_stats"].update_display(ActivityType.GRINDING)
                 self._frame_cache["activity_stats"].update_display(ActivityType.STAR_WAITING)
 
+        # Update screen recorder settings
+        self._update_screen_recorder_settings()
+
         # Save settings
         if self.app_settings_persistence:
             self.app_settings_persistence.save_settings(
                 background_image_path=self._background_image_path,
                 background_opacity=self._background_opacity,
                 theme=self._current_theme,
-                show_income_info=self._show_income_info
+                show_income_info=self._show_income_info,
+                screen_recorder_start_hotkey=self._screen_recorder_start_hotkey,
+                screen_recorder_stop_hotkey=self._screen_recorder_stop_hotkey,
+                screen_recorder_save_path=self._screen_recorder_save_path,
+                screen_recorder_record_mic=self._screen_recorder_record_mic,
+                screen_recorder_record_system=self._screen_recorder_record_system
             )
-
-        # Update background display
-        self._update_background()
 
         # Update background display
         self._update_background()
@@ -1631,3 +1674,67 @@ class MainWindow(QMainWindow):
                 "启动失败",
                 f"数据同步启动失败:\n{str(e)}"
             )
+
+    def _init_screen_recorder(self):
+        """Initialize screen recorder with loaded settings"""
+        try:
+            from .screen_recorder import ScreenRecorder
+            self._screen_recorder = ScreenRecorder(
+                start_hotkey=self._screen_recorder_start_hotkey,
+                stop_hotkey=self._screen_recorder_stop_hotkey,
+                save_path=self._screen_recorder_save_path,
+                record_mic=self._screen_recorder_record_mic,
+                record_system=self._screen_recorder_record_system
+            )
+            success = self._screen_recorder.setup_hotkeys()
+            if not success:
+                print("Warning: Failed to setup screen recorder hotkeys. Check if keyboard library is installed.")
+            else:
+                # Connect recording finished signal for logging
+                self._screen_recorder.recording_finished.connect(
+                    lambda path: print(f"✓ Recording completed: {path}")
+                )
+        except ImportError as e:
+            print(f"Screen recorder not available: {e}")
+            print("To enable screen recorder, run: pip install keyboard pyautogui opencv-python numpy")
+            print("For audio recording, also install: pip install pyaudio sounddevice soundfile")
+        except Exception as e:
+            print(f"Failed to initialize screen recorder: {e}")
+            self._screen_recorder = None
+
+    def _update_screen_recorder_settings(self):
+        """Update screen recorder with new settings"""
+        if self._screen_recorder is None:
+            # Try to initialize again
+            self._init_screen_recorder()
+            return
+
+        try:
+            self._screen_recorder.update_settings(
+                start_hotkey=self._screen_recorder_start_hotkey,
+                stop_hotkey=self._screen_recorder_stop_hotkey,
+                save_path=self._screen_recorder_save_path,
+                record_mic=self._screen_recorder_record_mic,
+                record_system=self._screen_recorder_record_system
+            )
+        except Exception as e:
+            print(f"Failed to update screen recorder settings: {e}")
+
+    def closeEvent(self, event):
+        """Handle window closing - save all data and cleanup"""
+        # Cleanup screen recorder
+        if self._screen_recorder:
+            if self._screen_recorder.is_currently_recording():
+                self._screen_recorder.stop_recording()
+            self._screen_recorder.unregister_hotkeys()
+
+        # Save data from all cached frames
+        if "activity_stats" in self._frame_cache:
+            self._frame_cache["activity_stats"].save_data()
+        if "storage" in self._frame_cache:
+            self._frame_cache["storage"].save_data()
+        if "bait" in self._frame_cache:
+            self._frame_cache["bait"].save_data()
+        if "daily_tasks" in self._frame_cache:
+            self._frame_cache["daily_tasks"].save_data()
+        event.accept()

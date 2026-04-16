@@ -583,13 +583,20 @@ class AppSettingsPersistence(DataPersistence):
     def __init__(self, file_path: str):
         super().__init__(file_path)
 
-    def save_settings(self, background_image_path: str = None, background_opacity: float = 0.15, theme: str = "dark", show_income_info: bool = False) -> None:
+    def save_settings(self, background_image_path: str = None, background_opacity: float = 0.15, theme: str = "dark", show_income_info: bool = False,
+                     screen_recorder_start_hotkey: str = None, screen_recorder_stop_hotkey: str = None, screen_recorder_save_path: str = None,
+                     screen_recorder_record_mic: bool = False, screen_recorder_record_system: bool = False) -> None:
         """Save application settings"""
         data = {
             'background_image_path': background_image_path if background_image_path else None,
             'background_opacity': background_opacity,
             'theme': theme,
             'show_income_info': show_income_info,
+            'screen_recorder_start_hotkey': screen_recorder_start_hotkey,
+            'screen_recorder_stop_hotkey': screen_recorder_stop_hotkey,
+            'screen_recorder_save_path': screen_recorder_save_path,
+            'screen_recorder_record_mic': screen_recorder_record_mic,
+            'screen_recorder_record_system': screen_recorder_record_system,
         }
         self.save(data)
 
@@ -602,6 +609,11 @@ class AppSettingsPersistence(DataPersistence):
                 'background_opacity': 0.15,
                 'theme': 'dark',
                 'show_income_info': False,
+                'screen_recorder_start_hotkey': 'ctrl+shift+r',
+                'screen_recorder_stop_hotkey': 'ctrl+shift+s',
+                'screen_recorder_save_path': None,
+                'screen_recorder_record_mic': False,
+                'screen_recorder_record_system': False,
             }
 
         try:
@@ -610,6 +622,11 @@ class AppSettingsPersistence(DataPersistence):
                 'background_opacity': float(data.get('background_opacity', 0.15)),
                 'theme': data.get('theme', 'dark'),
                 'show_income_info': data.get('show_income_info', False),
+                'screen_recorder_start_hotkey': data.get('screen_recorder_start_hotkey', 'ctrl+shift+r'),
+                'screen_recorder_stop_hotkey': data.get('screen_recorder_stop_hotkey', 'ctrl+shift+s'),
+                'screen_recorder_save_path': data.get('screen_recorder_save_path', None),
+                'screen_recorder_record_mic': data.get('screen_recorder_record_mic', False),
+                'screen_recorder_record_system': data.get('screen_recorder_record_system', False),
             }
         except (KeyError, ValueError):
             return {
@@ -617,6 +634,11 @@ class AppSettingsPersistence(DataPersistence):
                 'background_opacity': 0.15,
                 'theme': 'dark',
                 'show_income_info': False,
+                'screen_recorder_start_hotkey': 'ctrl+shift+r',
+                'screen_recorder_stop_hotkey': 'ctrl+shift+s',
+                'screen_recorder_save_path': None,
+                'screen_recorder_record_mic': False,
+                'screen_recorder_record_system': False,
             }
 
 
