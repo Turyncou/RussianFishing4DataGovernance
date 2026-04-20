@@ -19,7 +19,7 @@ from PySide6.QtCore import (
     Qt, QPoint, QTimer, QRect, QSize, Signal
 )
 
-from src.core.models import ActivityCharacter
+from src.core.models import ActivityCharacter, ActivityType
 from src.data.persistence import DailyTaskPersistence, DailyTaskCompletion
 
 
