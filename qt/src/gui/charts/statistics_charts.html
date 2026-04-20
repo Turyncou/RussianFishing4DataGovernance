@@ -285,7 +285,9 @@
                     label: {
                         show: true,
                         position: 'right',
-                        formatter: '{c:.2f}',
+                        formatter: function(params) {
+                            return params.value.toFixed(2);
+                        },
                         color: isDark ? '#ffffff' : '#333333'
                     }
                 }],
@@ -339,7 +341,9 @@
                     label: {
                         show: true,
                         position: 'right',
-                        formatter: '{c:.2f}',
+                        formatter: function(params) {
+                            return params.value.toFixed(2);
+                        },
                         color: isDark ? '#ffffff' : '#333333'
                     }
                 }],
