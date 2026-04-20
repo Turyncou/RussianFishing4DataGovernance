@@ -1,43 +1,37 @@
-"""Data analysis page with practical actionable insights for RF4 players"""
+"""Data analysis page with practical actionable insights for RF4 players
+Uses HTML + ECharts for better performance and beautiful interactive charts"""
 from collections import defaultdict
 from datetime import date, timedelta
-import numpy as np
-import matplotlib
-matplotlib.use('Qt5Agg')
-from matplotlib.backends.backend_qtagg import FigureCanvas
-from matplotlib.animation import FuncAnimation
-from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
-
-# Configure matplotlib to use Chinese font
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans', 'Arial Unicode MS']
-plt.rcParams['axes.unicode_minus'] = False
+import os
+import json
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTabWidget, QComboBox,
-    QGroupBox, QGridLayout, QProgressBar, QTableWidget, QTableWidgetItem,
+    QGroupBox, QProgressBar, QTableWidget, QTableWidgetItem,
     QHeaderView, QFrame
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtCore import QUrl, Qt
+from PySide6.QtGui import QFont
 
 from src.data.persistence import ActivityPersistence
 from src.core.models import ActivityType, ActivityCharacter
 
 
 class StatisticsFrame(QWidget):
-    """Data analysis page with practical insights for RF4 players"""
+    """Data analysis page with practical insights for RF4 players
+    Uses ECharts via QWebEngineView for beautiful interactive charts"""
 
     def __init__(self, activity_persistence: ActivityPersistence):
         super().__init__()
         self.activity_persistence = activity_persistence
-        self.animations = []
         self.characters = []
         self.global_settings = None
 
         # Filtered records for detail table
         self.all_records = []
         self.filtered_records = []
+        self.html_loaded = False
 
         self._create_widgets()
         self.refresh_plots()
@@ -62,19 +56,13 @@ class StatisticsFrame(QWidget):
         self.tab_widget = QTabWidget()
         self.tab_widget.setFont(QFont("Segoe UI", 14))
 
-        # 1. 效率分析 - 核心功能（只保留排名，去掉趋势图）
-        self._create_efficiency_tab()
+        # 1. 图表汇总 - all charts in one tab via ECharts
+        self._create_charts_tab()
 
         # 2. 目标进度 - 核心功能
         self._create_goal_progress_tab()
 
-        # 3. 每日收入 - 用户最关注: 每天赚多少钱
-        self._create_daily_income_tab()
-
-        # 4. 任务完成统计 - 用户最关注: 任务每日完成情况
-        self._create_task_completion_tab()
-
-        # 5. 收益明细 - 查看详细记录
+        # 3. 收益明细 - 查看详细记录
         self._create_detailed_records_tab()
 
         layout.addWidget(self.tab_widget, 1)
@@ -146,26 +134,33 @@ class StatisticsFrame(QWidget):
 
         return container
 
-    def _create_efficiency_tab(self):
-        """Create efficiency analysis tab - only keep rankings"""
+    def _create_charts_tab(self):
+        """Create charts tab with ECharts in QWebEngineView"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(10)
 
-        # SPM ranking chart
-        self.fig_spm = Figure(figsize=(8, 3.5), dpi=100)
-        self.ax_spm = self.fig_spm.add_subplot(111)
-        self.canvas_spm = FigureCanvas(self.fig_spm)
-        layout.addWidget(self.canvas_spm)
+        # Create web view for ECharts
+        self.web_view = QWebEngineView()
+        self.html_loaded = False
+        # Connect load finished signal
+        self.web_view.loadFinished.connect(self._on_html_loaded)
+        # Load local HTML file
+        script_dir = os.path.abspath(os.path.dirname(__file__))
+        html_path = os.path.join(script_dir, 'charts', 'statistics_charts.html')
+        html_url = QUrl.fromLocalFile(html_path)
+        self.web_view.load(html_url)
 
-        # Star per hour ranking chart
-        self.fig_star = Figure(figsize=(8, 3.5), dpi=100)
-        self.ax_star = self.fig_star.add_subplot(111)
-        self.canvas_star = FigureCanvas(self.fig_star)
-        layout.addWidget(self.canvas_star)
+        layout.addWidget(self.web_view)
+        self.tab_widget.addTab(tab, "📊 数据图表")
 
-        self.tab_widget.addTab(tab, "⚡ 效率分析")
+    def _on_html_loaded(self, success):
+        """Called when HTML finishes loading"""
+        if success:
+            self.html_loaded = True
+            # Update charts once loaded
+            self._update_charts_html()
 
     def _create_goal_progress_tab(self):
         """Create goal progress tab with progress bars and completion forecast"""
@@ -191,7 +186,6 @@ class StatisticsFrame(QWidget):
         layout.addWidget(scroll)
 
         self.tab_widget.addTab(tab, "🎯 目标进度")
-
 
     def _create_detailed_records_tab(self):
         """Create detailed records tab with filterable table"""
@@ -236,100 +230,140 @@ class StatisticsFrame(QWidget):
 
         self.tab_widget.addTab(tab, "📋 收益明细")
 
-    def _create_daily_trend_tab(self):
-        """Create daily trend tab (retained from original)"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(5, 5, 5, 5)
-        self.fig_daily = Figure(figsize=(8, 5), dpi=100)
-        self.ax_daily = self.fig_daily.add_subplot(111)
-        self.canvas_daily = FigureCanvas(self.fig_daily)
-        layout.addWidget(self.canvas_daily)
-        self.tab_widget.addTab(tab, "每日收益趋势")
-
-    def _create_character_comparison_tab(self):
-        """Create character comparison tab (retained from original)"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(5, 5, 5, 5)
-        self.fig_char = Figure(figsize=(8, 5), dpi=100)
-        self.ax_char = self.fig_char.add_subplot(111)
-        self.canvas_char = FigureCanvas(self.fig_char)
-        layout.addWidget(self.canvas_char)
-        self.tab_widget.addTab(tab, "角色收益对比")
-
-    def _create_type_distribution_tab(self):
-        """Create activity type distribution tab (retained from original)"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(5, 5, 5, 5)
-        self.fig_type = Figure(figsize=(6, 4), dpi=100)
-        self.ax_type = self.fig_type.add_subplot(111)
-        self.canvas_type = FigureCanvas(self.fig_type)
-        layout.addWidget(self.canvas_type)
-        self.tab_widget.addTab(tab, "活动类型分布")
-
-    def _create_character_time_tab(self):
-        """Create character time distribution tab (retained from original)"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(5, 5, 5, 5)
-        self.fig_char_time = Figure(figsize=(6, 4), dpi=100)
-        self.ax_char_time = self.fig_char_time.add_subplot(111)
-        self.canvas_char_time = FigureCanvas(self.fig_char_time)
-        layout.addWidget(self.canvas_char_time)
-        self.tab_widget.addTab(tab, "角色时长分布")
-
-    def _setup_axes_theme(self, ax):
-        """Setup axes for current theme"""
+    def _get_current_theme(self):
+        """Get current theme from main window"""
         window = self.window()
-        is_dark = True
         if hasattr(window, '_current_theme'):
-            is_dark = (window._current_theme == "dark")
-        if is_dark:
-            ax.set_facecolor("#2b2b2b")
-            if ax.figure is not None:
-                ax.figure.set_facecolor("#2b2b2b")
-            for spine in ax.spines.values():
-                spine.set_color('white')
-            ax.tick_params(axis='x', colors='white')
-            ax.tick_params(axis='y', colors='white')
-            ax.yaxis.label.set_color('white')
-            ax.xaxis.label.set_color('white')
-            if ax.title is not None:
-                ax.title.set_color('white')
-        else:
-            ax.set_facecolor("#ffffff")
-            if ax.figure is not None:
-                ax.figure.set_facecolor("#ffffff")
-            for spine in ax.spines.values():
-                spine.set_color('black')
-            ax.tick_params(axis='x', colors='black')
-            ax.tick_params(axis='y', colors='black')
-            ax.yaxis.label.set_color('black')
-            ax.xaxis.label.set_color('black')
-            if ax.title is not None:
-                ax.title.set_color('black')
+            return window._current_theme
+        return "dark"
 
     def refresh_plots(self):
-        """Refresh data and replay all animations"""
-        # Stop existing animations
-        for anim in self.animations:
-            if anim is not None and anim.event_source is not None:
-                anim.event_source.stop()
-        self.animations.clear()
-
+        """Refresh data and update all charts"""
         self._load_data()
         self._update_summary_kpi()
-        self._plot_efficiency()
         self._plot_goal_progress()
-        self._plot_daily_income()
-        self._plot_task_completion()
+        self._update_charts_html()
         self._apply_filters()
 
-    def replay_animation(self):
-        """Replay all animations"""
-        self.refresh_plots()
+    def _update_charts_html(self):
+        """Send data to HTML via JavaScript for ECharts rendering"""
+        if not self.html_loaded:
+            return
+
+        # Prepare chart data
+        chart_data = {
+            'spm': self._prepare_spm_data(),
+            'star': self._prepare_star_data(),
+            'dailyIncome': self._prepare_daily_income_data(),
+            'cumulative': self._prepare_cumulative_data(),
+            'task': self._prepare_task_data()
+        }
+
+        theme = self._get_current_theme()
+        json_data = json.dumps(chart_data, ensure_ascii=False)
+
+        # Call JavaScript function to update charts
+        js_code = f"window.updateChartsFromPython({json_data}, '{theme}');"
+        self.web_view.page().runJavaScript(js_code)
+
+    def _prepare_spm_data(self):
+        """Prepare SPM ranking data for ECharts"""
+        spm_data, _ = self._calculate_efficiency_data()
+        result = []
+        if spm_data:
+            # Limit to top 10
+            if len(spm_data) > 10:
+                spm_data = spm_data[:10]
+            # Reverse for bottom to top in chart
+            spm_data.reverse()
+            for d in spm_data:
+                result.append({
+                    'name': d[0],
+                    'value': round(d[1], 2)
+                })
+        return result
+
+    def _prepare_star_data(self):
+        """Prepare star per hour data for ECharts"""
+        _, star_data = self._calculate_efficiency_data()
+        result = []
+        if star_data:
+            # Limit to top 10
+            if len(star_data) > 10:
+                star_data = star_data[:10]
+            # Reverse for bottom to top in chart
+            star_data.reverse()
+            for d in star_data:
+                result.append({
+                    'name': d[0],
+                    'value': round(d[1], 2)
+                })
+        return result
+
+    def _prepare_daily_income_data(self):
+        """Prepare daily income data for ECharts"""
+        daily_data = defaultdict(int)
+        for record in self.all_records:
+            daily_data[record['date']] += record['silver']
+
+        result = []
+        if daily_data:
+            sorted_dates = sorted(daily_data.keys())
+            # Limit to last 30 days
+            if len(sorted_dates) > 30:
+                sorted_dates = sorted_dates[-30:]
+
+            for d in sorted_dates:
+                result.append({
+                    'date': d.strftime('%m-%d'),
+                    'value': daily_data[d]
+                })
+        return result
+
+    def _prepare_cumulative_data(self):
+        """Prepare cumulative income data for ECharts"""
+        daily_data = defaultdict(int)
+        for record in self.all_records:
+            daily_data[record['date']] += record['silver']
+
+        result = []
+        if daily_data:
+            sorted_dates = sorted(daily_data.keys())
+            cumulative = []
+            total = 0
+            for d in sorted_dates:
+                total += daily_data[d]
+                cumulative.append(total)
+                result.append({
+                    'date': d.strftime('%m-%d'),
+                    'cumulative': total
+                })
+        return result
+
+    def _prepare_task_data(self):
+        """Prepare today's task duration data for ECharts"""
+        has_data = False
+        task_data = []
+        today = date.today()
+
+        for char in self.characters:
+            for activity_type in [ActivityType.GRINDING, ActivityType.STAR_WAITING]:
+                _, actual_duration = char.calculate_today_totals(activity_type)
+                if actual_duration > 0:
+                    has_data = True
+                    type_name = "grinding" if activity_type == ActivityType.GRINDING else "star"
+                    char_name = f"{char.name} ({'搬砖' if activity_type == ActivityType.GRINDING else '蹲星'})"
+                    task_data.append({
+                        'name': char_name,
+                        'duration': round(actual_duration / 60, 1),
+                        'type': type_name
+                    })
+
+        if has_data and task_data:
+            # Reverse for bottom to top display
+            task_data.reverse()
+
+        return task_data
 
     def _load_data(self):
         """Load data with date range filtering"""
@@ -713,312 +747,20 @@ class StatisticsFrame(QWidget):
 
         self.goal_layout.addStretch()
 
-
-    def _create_daily_income_tab(self):
-        """Create daily income tab - user cares about how much earned each day"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(5, 5, 5, 5)
-
-        # Daily income chart
-        self.fig_daily_income = Figure(figsize=(8, 5), dpi=100)
-        self.ax_daily_income = self.fig_daily_income.add_subplot(111)
-        self.canvas_daily_income = FigureCanvas(self.fig_daily_income)
-        layout.addWidget(self.canvas_daily_income)
-
-        # Cumulative chart
-        self.fig_cumulative = Figure(figsize=(8, 4), dpi=100)
-        self.ax_cumulative = self.fig_cumulative.add_subplot(111)
-        self.canvas_cumulative = FigureCanvas(self.fig_cumulative)
-        layout.addWidget(self.canvas_cumulative)
-
-        self.tab_widget.addTab(tab, "💰 每日收入")
-
-    def _create_task_completion_tab(self):
-        """Create task completion tab - user cares about daily task completion"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(5, 5, 5, 5)
-
-        # Daily completion rate chart
-        self.fig_completion = Figure(figsize=(8, 5), dpi=100)
-        self.ax_completion = self.fig_completion.add_subplot(111)
-        self.canvas_completion = FigureCanvas(self.fig_completion)
-        layout.addWidget(self.canvas_completion)
-
-        # Character completion summary table
-        from PySide6.QtWidgets import QTableWidget
-        self.task_table = QTableWidget()
-        self.task_table.setColumnCount(4)
-        self.task_table.setHorizontalHeaderLabels(["角色", "活动类型", "目标时长", "完成率"])
-        self.task_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.task_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.task_table.verticalHeader().setVisible(False)
-        layout.addWidget(self.task_table)
-
-        self.tab_widget.addTab(tab, "✅ 任务完成")
-
-    def _plot_efficiency(self):
-        """Plot efficiency analysis charts"""
-        spm_data, star_data = self._calculate_efficiency_data()
-
-        # Plot SPM ranking
-        self.ax_spm.clear()
-        self._setup_axes_theme(self.ax_spm)
-
-        if spm_data:
-            names = [d[0] for d in spm_data]
-            values = [d[1] for d in spm_data]
-
-            # Limit to top 10
-            if len(names) > 10:
-                names = names[:10]
-                values = values[:10]
-
-            # Reverse for bottom to top display
-            names.reverse()
-            values.reverse()
-
-            self.final_spm_heights = values
-            self.bars_spm = self.ax_spm.barh(names, [0] * len(names), color='#2196F3')
-            self.ax_spm.set_title("SPM (银币每分钟) 排名", fontsize=12)
-            self.ax_spm.set_xlabel("银币/分钟")
-
-            def animate_spm(frame):
-                progress = frame / 30
-                for i, bar in enumerate(self.bars_spm):
-                    bar.set_width(self.final_spm_heights[i] * progress)
-                return list(self.bars_spm)
-
-            anim = FuncAnimation(
-                self.fig_spm, animate_spm, frames=30, interval=20, repeat=False, blit=False
-            )
-            self.animations.append(anim)
-        else:
-            self._show_no_data_in_ax(self.ax_spm)
-
-        self.canvas_spm.draw()
-
-        # Plot star per hour ranking
-        self.ax_star.clear()
-        self._setup_axes_theme(self.ax_star)
-
-        if star_data:
-            names = [d[0] for d in star_data]
-            values = [d[1] for d in star_data]
-
-            if len(names) > 10:
-                names = names[:10]
-                values = values[:10]
-
-            names.reverse()
-            values.reverse()
-
-            self.final_star_heights = values
-            self.bars_star = self.ax_star.barh(names, [0] * len(names), color='#FF9800')
-            self.ax_star.set_title("星星每小时 排名", fontsize=12)
-            self.ax_star.set_xlabel("星星/小时")
-
-            def animate_star(frame):
-                progress = frame / 30
-                for i, bar in enumerate(self.bars_star):
-                    bar.set_width(self.final_star_heights[i] * progress)
-                return list(self.bars_star)
-
-            anim = FuncAnimation(
-                self.fig_star, animate_star, frames=30, interval=20, repeat=False, blit=False
-            )
-            self.animations.append(anim)
-        else:
-            self._show_no_data_in_ax(self.ax_star)
-
-        self.canvas_star.draw()
-
-    def _plot_daily_income(self):
-        """Plot daily income chart - what user cares about"""
-        # Aggregate by day
-        daily_data = defaultdict(int)
-        for record in self.all_records:
-            daily_data[record['date']] += record['silver']
-
-        # Plot daily income
-        self.ax_daily_income.clear()
-        self._setup_axes_theme(self.ax_daily_income)
-
-        if daily_data:
-            sorted_dates = sorted(daily_data.keys())
-            values = [daily_data[d] for d in sorted_dates]
-
-            # Limit to last 30 days for better visibility
-            if len(sorted_dates) > 30:
-                sorted_dates = sorted_dates[-30:]
-                values = values[-30:]
-
-            self.final_daily_values = values
-            self.bars_daily = self.ax_daily_income.bar(
-                [d.strftime('%m-%d') for d in sorted_dates],
-                [0] * len(values),
-                color='#FF9800'
-            )
-            self.ax_daily_income.set_title("每日银币收入 (最近30天)", fontsize=12)
-            self.ax_daily_income.set_ylabel("银币数量")
-
-            if len(sorted_dates) > 10:
-                plt.setp(self.ax_daily_income.get_xticklabels(), rotation=45)
-
-            def animate_daily(frame):
-                progress = frame / 50
-                for i, bar in enumerate(self.bars_daily):
-                    bar.set_height(self.final_daily_values[i] * progress)
-                return list(self.bars_daily)
-
-            anim = FuncAnimation(
-                self.fig_daily_income, animate_daily, frames=50, interval=20, repeat=False, blit=False
-            )
-            self.animations.append(anim)
-        else:
-            self._show_no_data_in_ax(self.ax_daily_income)
-
-        self.canvas_daily_income.draw()
-
-        # Plot cumulative income
-        self.ax_cumulative.clear()
-        self._setup_axes_theme(self.ax_cumulative)
-
-        if daily_data:
-            sorted_dates = sorted(daily_data.keys())
-            daily_silver = [daily_data[d] for d in sorted_dates]
-
-            # Calculate cumulative
-            cumulative = []
-            total = 0
-            for s in daily_silver:
-                total += s
-                cumulative.append(total)
-
-            x_numeric = list(range(len(sorted_dates)))
-            self.final_x_cum = x_numeric
-            self.final_y_cum = cumulative
-            self.line_cum, = self.ax_cumulative.plot([], [], color='#4CAF50', linewidth=3)
-            self.ax_cumulative.set_title("累计银币收入", fontsize=12)
-            self.ax_cumulative.set_ylabel("累计银币")
-            self.ax_cumulative.grid(True, alpha=0.3)
-
-            step = max(1, len(x_numeric) // 10)
-            self.ax_cumulative.set_xticks(x_numeric[::step])
-            self.ax_cumulative.set_xticklabels([d.strftime('%m-%d') for d in sorted_dates[::step]])
-
-            def animate_cum(frame):
-                if frame < len(self.final_x_cum):
-                    self.line_cum.set_data(self.final_x_cum[:frame+1], self.final_y_cum[:frame+1])
-                return [self.line_cum]
-
-            anim = FuncAnimation(
-                self.fig_cumulative, animate_cum, frames=len(x_numeric) + 5, interval=30, repeat=False, blit=False
-            )
-            self.animations.append(anim)
-        else:
-            self._show_no_data_in_ax(self.ax_cumulative)
-
-        self.canvas_cumulative.draw()
-
-    def _plot_task_completion(self):
-        """Plot task completion statistics - what user cares about"""
-        # We need to get daily task persistence from somewhere
-        # Actually, daily task data is stored separately, but we can get it from main window
-        # For now, we'll show completion based on what we can get from existing data
-
-        # Collect all tasks from daily tasks - but we don't have access here
-        # So we'll just show based on character activity records compared to daily targets
-
-        has_data = False
-        task_data = []
-
-        for char in self.characters:
-            # Check if there are any today's records
-            today = date.today()
-            for activity_type in [ActivityType.GRINDING, ActivityType.STAR_WAITING]:
-                total_value, actual_duration = char.calculate_today_totals(activity_type)
-                # We can't get the daily target from here, but we can show based on goals
-                task_data.append({
-                    'character': char.name,
-                    'type': activity_type,
-                    'actual_duration': actual_duration
-                })
-                has_data = True
-
-        # Plot completion rate trend (if we had historical data)
-        # For now, just show a summary table
-        self._populate_task_table(task_data)
-
-        # Plot chart - we'll show actual duration by character
-        self.ax_completion.clear()
-        self._setup_axes_theme(self.ax_completion)
-
-        if has_data and task_data:
-            char_names = []
-            durations = []
-            colors = []
-            for d in task_data:
-                char_names.append(f"{d['character']}\n({'搬砖' if d['type'] == ActivityType.GRINDING else '蹲星'})")
-                durations.append(d['actual_duration'] / 60)  # convert to hours
-                colors.append('#2196F3' if d['type'] == ActivityType.GRINDING else '#FF9800')
-
-            char_names.reverse()
-            durations.reverse()
-            colors.reverse()
-
-            self.final_task_heights = durations
-            self.bars_task = self.ax_task = self.ax_completion.barh(char_names, [0] * len(durations), color=colors)
-            self.ax_completion.set_title("今日活动时长 (小时)", fontsize=12)
-            self.ax_completion.set_xlabel("时长(小时)")
-
-            def animate_task(frame):
-                progress = frame / 30
-                for i, bar in enumerate(self.bars_task):
-                    bar.set_width(self.final_task_heights[i] * progress)
-                return list(self.bars_task)
-
-            anim = FuncAnimation(
-                self.fig_completion, animate_task, frames=30, interval=20, repeat=False, blit=False
-            )
-            self.animations.append(anim)
-        else:
-            self._show_no_data_in_ax(self.ax_completion)
-
-        self.canvas_completion.draw()
-
     def _populate_task_table(self, task_data):
-        """Populate the task completion summary table"""
-        self.task_table.setRowCount(len(task_data))
+        """Populate the task completion summary table (kept for compatibility, not used in new layout)"""
+        # This method is kept but not used in the new HTML-based layout
+        pass
 
-        for i, data in enumerate(task_data):
-            type_text = "搬砖" if data['type'] == ActivityType.GRINDING else "蹲星"
-            duration_hours = data['actual_duration'] / 60
-
-            self.task_table.setItem(i, 0, QTableWidgetItem(data['character']))
-            self.task_table.setItem(i, 1, QTableWidgetItem(type_text))
-            self.task_table.setItem(i, 2, QTableWidgetItem(f"{duration_hours:.1f} 小时"))
-
-            # Can't calculate completion rate without daily target, leave empty
-            self.task_table.setItem(i, 3, QTableWidgetItem("-"))
-
-    def _show_no_data_in_ax(self, ax):
-        """Show no data message in axis"""
-        window = self.window()
-        is_dark = True
-        if hasattr(window, '_current_theme'):
-            is_dark = (window._current_theme == "dark")
-        text_color = 'white' if is_dark else 'black'
-        ax.text(0.5, 0.5, '暂无活动记录数据\n请先在活动统计中添加记录',
-                horizontalalignment='center',
-                verticalalignment='center',
-                transform=ax.transAxes,
-                color=text_color,
-                fontsize=14)
+    def resizeEvent(self, event):
+        """Resize web view when widget resizes"""
+        super().resizeEvent(event)
+        if hasattr(self, 'web_view') and self.html_loaded:
+            # Trigger resize in ECharts
+            self.web_view.page().runJavaScript("window.resizeAll();")
 
     def _update_stylesheet(self):
-        """Update chart theme based on current theme"""
+        """Update chart theme when theme changes"""
         # Update tab widget style
         window = self.window()
         is_dark = True
@@ -1068,5 +810,6 @@ class StatisticsFrame(QWidget):
                 }
             """)
 
-        # Refresh plots with new theme
-        self.refresh_plots()
+        # Refresh charts with new theme
+        if self.html_loaded:
+            self._update_charts_html()

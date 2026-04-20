@@ -585,7 +585,8 @@ class AppSettingsPersistence(DataPersistence):
 
     def save_settings(self, background_image_path: str = None, background_opacity: float = 0.15, theme: str = "dark", show_income_info: bool = False,
                      screen_recorder_start_hotkey: str = None, screen_recorder_stop_hotkey: str = None, screen_recorder_save_path: str = None,
-                     screen_recorder_record_mic: bool = False, screen_recorder_record_system: bool = False) -> None:
+                     screen_recorder_record_mic: bool = False, screen_recorder_record_system: bool = False,
+                     special_cursor_on_hover: bool = True) -> None:
         """Save application settings"""
         data = {
             'background_image_path': background_image_path if background_image_path else None,
@@ -597,6 +598,7 @@ class AppSettingsPersistence(DataPersistence):
             'screen_recorder_save_path': screen_recorder_save_path,
             'screen_recorder_record_mic': screen_recorder_record_mic,
             'screen_recorder_record_system': screen_recorder_record_system,
+            'special_cursor_on_hover': special_cursor_on_hover,
         }
         self.save(data)
 
@@ -627,6 +629,7 @@ class AppSettingsPersistence(DataPersistence):
                 'screen_recorder_save_path': data.get('screen_recorder_save_path', None),
                 'screen_recorder_record_mic': data.get('screen_recorder_record_mic', False),
                 'screen_recorder_record_system': data.get('screen_recorder_record_system', False),
+                'special_cursor_on_hover': data.get('special_cursor_on_hover', True),
             }
         except (KeyError, ValueError):
             return {
@@ -639,6 +642,7 @@ class AppSettingsPersistence(DataPersistence):
                 'screen_recorder_save_path': None,
                 'screen_recorder_record_mic': False,
                 'screen_recorder_record_system': False,
+                'special_cursor_on_hover': True,
             }
 
 

@@ -174,6 +174,9 @@ class MainWindow(QMainWindow):
         self._screen_recorder_record_mic = False
         self._screen_recorder_record_system = False
 
+        # Special cursor on hover setting
+        self._special_cursor_on_hover = True
+
         # Home page navigation buttons (for theme updates)
         self._home_buttons = []
 
@@ -631,7 +634,7 @@ class MainWindow(QMainWindow):
                     background-color: rgba(31, 111, 235, 0.9);
                 }
                 QPushButton:hover {
-                    background-color: rgba(100, 100, 100, 0.8);
+                    background-color: rgba(100, 100, 120, 0.8);
                 }
             """)
 
@@ -780,6 +783,7 @@ class MainWindow(QMainWindow):
             self._screen_recorder_save_path = settings.get('screen_recorder_save_path', None)
             self._screen_recorder_record_mic = settings.get('screen_recorder_record_mic', False)
             self._screen_recorder_record_system = settings.get('screen_recorder_record_system', False)
+            self._special_cursor_on_hover = settings.get('special_cursor_on_hover', True)
 
             # Initialize daily tasks persistence
             self.daily_task_persistence = DailyTaskPersistence(os.path.join(self.data_dir, 'daily_tasks.json'))
@@ -1376,14 +1380,16 @@ class MainWindow(QMainWindow):
             self._screen_recorder_stop_hotkey,
             self._screen_recorder_save_path,
             self._screen_recorder_record_mic,
-            self._screen_recorder_record_system
+            self._screen_recorder_record_system,
+            self._special_cursor_on_hover
         )
         dialog.settings_changed.connect(self._on_app_settings_changed)
         dialog.exec()
 
     def _on_app_settings_changed(self, image_path: str, opacity: float, theme: str, show_income: bool,
                                   start_hotkey: str = None, stop_hotkey: str = None, save_path: str = None,
-                                  record_mic: bool = None, record_system: bool = None):
+                                  record_mic: bool = None, record_system: bool = None,
+                                  special_cursor_on_hover: bool = None):
         """Callback when application settings are changed"""
         self._background_image_path = image_path
         self._background_opacity = opacity
@@ -1398,6 +1404,8 @@ class MainWindow(QMainWindow):
             self._screen_recorder_record_mic = record_mic
         if record_system is not None:
             self._screen_recorder_record_system = record_system
+        if special_cursor_on_hover is not None:
+            self._special_cursor_on_hover = special_cursor_on_hover
 
         # Update theme if it changed
         self._apply_current_theme()
@@ -1424,7 +1432,8 @@ class MainWindow(QMainWindow):
                 screen_recorder_stop_hotkey=self._screen_recorder_stop_hotkey,
                 screen_recorder_save_path=self._screen_recorder_save_path,
                 screen_recorder_record_mic=self._screen_recorder_record_mic,
-                screen_recorder_record_system=self._screen_recorder_record_system
+                screen_recorder_record_system=self._screen_recorder_record_system,
+                special_cursor_on_hover=self._special_cursor_on_hover
             )
 
         # Update background display
@@ -1738,3 +1747,41 @@ class MainWindow(QMainWindow):
         if "daily_tasks" in self._frame_cache:
             self._frame_cache["daily_tasks"].save_data()
         event.accept()
+
+    def enterEvent(self, event):
+        """Mouse enters window - change to hand cursor if enabled"""
+        if self._special_cursor_on_hover:
+            from PySide6.QtGui import QCursor, QPixmap, QBitmap
+            import os
+            # Check for custom cursor files in assets directory
+            script_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+            # Try .cur file first (Windows cursor format)
+            cur_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.cur')
+            png_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.png')
+
+            custom_cursor = None
+            if os.path.exists(cur_path):
+                # Load cursor from .cur file
+                pixmap = QPixmap(cur_path)
+                if not pixmap.isNull():
+                    # Use top-left as hotspot
+                    custom_cursor = QCursor(pixmap, 0, 0)
+            elif os.path.exists(png_path):
+                # Load cursor from .png file
+                pixmap = QPixmap(png_path)
+                if not pixmap.isNull():
+                    # Assume hotspot at top-left (0,0)
+                    # If you need different hotspot, you can modify this code
+                    custom_cursor = QCursor(pixmap, 0, 0)
+
+            if custom_cursor and not custom_cursor.pixmap().isNull():
+                self.setCursor(custom_cursor)
+            else:
+                # Fallback to default pointing hand cursor
+                self.setCursor(Qt.PointingHandCursor)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        """Mouse leaves window - revert to arrow cursor"""
+        self.setCursor(Qt.ArrowCursor)
+        super().leaveEvent(event)

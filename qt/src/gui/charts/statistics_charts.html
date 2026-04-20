@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RF4 数据分析图表</title>
+    <script src="./echarts.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: transparent;
+        }
+        .chart-container {
+            margin-bottom: 15px;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .chart-title {
+            padding: 8px 12px;
+            font-size: 14px;
+            font-weight: 600;
+            background: rgba(0, 0, 0, 0.05);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        }
+        .chart-wrapper {
+            height: 280px;
+            width: 100%;
+        }
+        .chart-wrapper.large {
+            height: 320px;
+        }
+        .chart-container {
+            transition: box-shadow 0.3s ease, transform 0.3s ease;
+        }
+        .chart-container:hover {
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+            transform: translateY(-3px);
+        }
+        /* Dark theme styles */
+        body.dark {
+            color: #ffffff;
+            background: transparent;
+        }
+        body.dark .chart-container {
+            background: #2b2b2b;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        body.dark .chart-container:hover {
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+        }
+        body.dark .chart-title {
+            background: rgba(255, 255, 255, 0.08);
+            border-bottom-color: rgba(255, 255, 255, 0.15);
+        }
+        /* Light theme styles */
+        body.light {
+            color: #333333;
+            background: transparent;
+        }
+        body.light .chart-container {
+            background: #ffffff;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+        body.light .chart-container:hover {
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+        }
+        body.light .chart-title {
+            background: rgba(0, 0, 0, 0.03);
+            border-bottom-color: rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body id="body" class="dark">
+    <div id="spm-chart-container" class="chart-container">
+        <div class="chart-title">SPM (银币每分钟) 排名</div>
+        <div id="spm-chart" class="chart-wrapper"></div>
+    </div>
+
+    <div id="star-chart-container" class="chart-container">
+        <div class="chart-title">星星每小时 排名</div>
+        <div id="star-chart" class="chart-wrapper"></div>
+    </div>
+
+    <div id="daily-income-container" class="chart-container">
+        <div class="chart-title">每日银币收入 (最近30天)</div>
+        <div id="daily-income-chart" class="chart-wrapper large"></div>
+    </div>
+
+    <div id="cumulative-container" class="chart-container">
+        <div class="chart-title">累计银币收入</div>
+        <div id="cumulative-chart" class="chart-wrapper large"></div>
+    </div>
+
+    <div id="task-container" class="chart-container">
+        <div class="chart-title">今日活动时长 (小时)</div>
+        <div id="task-chart" class="chart-wrapper"></div>
+    </div>
+
+    <script>
+        // Initialize ECharts instances
+        var spmChart = echarts.init(document.getElementById('spm-chart'), null, {renderer: 'canvas'});
+        var starChart = echarts.init(document.getElementById('star-chart'), null, {renderer: 'canvas'});
+        var dailyIncomeChart = echarts.init(document.getElementById('daily-income-chart'), null, {renderer: 'canvas'});
+        var cumulativeChart = echarts.init(document.getElementById('cumulative-chart'), null, {renderer: 'canvas'});
+        var taskChart = echarts.init(document.getElementById('task-chart'), null, {renderer: 'canvas'});
+
+        var currentTheme = 'dark';
+        var chartData = null;
+
+        // Base option template
+        function getBaseOption(isDark) {
+            var textColor = isDark ? '#ffffff' : '#333333';
+            var axisColor = isDark ? '#aaaaaa' : '#888888';
+            var splitLineColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+
+            return {
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: isDark ? 'rgba(40, 40, 40, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)',
+                    textStyle: {
+                        color: textColor
+                    },
+                    transitionDuration: 200,
+                    extraCssText: 'box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); border-radius: 6px;'
+                },
+                grid: {
+                    left: '10%',
+                    right: '5%',
+                    top: '15%',
+                    bottom: '15%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'value',
+                    axisLine: {
+                        lineStyle: {
+                            color: axisColor
+                        }
+                    },
+                    axisLabel: {
+                        color: textColor,
+                        fontSize: 11
+                    },
+                    splitLine: {
+                        lineStyle: {
+                            color: splitLineColor,
+                            type: 'dashed'
+                        }
+                    }
+                },
+                yAxis: {
+                    type: 'category',
+                    axisLine: {
+                        lineStyle: {
+                            color: axisColor
+                        }
+                    },
+                    axisLabel: {
+                        color: textColor,
+                        fontSize: 12
+                    },
+                    splitLine: {
+                        show: false
+                    }
+                },
+                animation: true,
+                animationDuration: 800,
+                animationEasing: 'quarticOut',
+                animationDelay: function(idx) {
+                    return idx * 60 + 100;
+                }
+            };
+        }
+
+        function getBaseLineOption(isDark) {
+            var textColor = isDark ? '#ffffff' : '#333333';
+            var axisColor = isDark ? '#aaaaaa' : '#888888';
+            var splitLineColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+
+            return {
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: isDark ? 'rgba(40, 40, 40, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)',
+                    textStyle: {
+                        color: textColor
+                    },
+                    transitionDuration: 200,
+                    extraCssText: 'box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); border-radius: 6px;'
+                },
+                grid: {
+                    left: '8%',
+                    right: '5%',
+                    top: '15%',
+                    bottom: '25%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    axisLine: {
+                        lineStyle: {
+                            color: axisColor
+                        }
+                    },
+                    axisLabel: {
+                        color: textColor,
+                        rotate: 45,
+                        fontSize: 11
+                    },
+                    splitLine: {
+                        show: false
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLine: {
+                        lineStyle: {
+                            color: axisColor
+                        }
+                    },
+                    axisLabel: {
+                        color: textColor,
+                        fontSize: 11
+                    },
+                    splitLine: {
+                        lineStyle: {
+                            color: splitLineColor,
+                            type: 'dashed'
+                        }
+                    }
+                },
+                animation: true,
+                animationDuration: 1000,
+                animationEasing: 'quarticOut',
+                animationDelay: function(idx) {
+                    return idx * 30 + 200;
+                }
+            };
+        }
+
+        function renderSPMChart(data, isDark) {
+            if (!data || data.length === 0) {
+                spmChart.clear();
+                document.getElementById('spm-chart-container').style.display = 'none';
+                return;
+            }
+            document.getElementById('spm-chart-container').style.display = 'block';
+
+            var names = data.map(d => d.name);
+            var values = data.map(d => d.value);
+            var baseOption = getBaseOption(isDark);
+
+            var option = {
+                ...baseOption,
+                yAxis: {
+                    ...baseOption.yAxis,
+                    data: names
+                },
+                series: [{
+                    data: values,
+                    type: 'bar',
+                    itemStyle: {
+                        color: new echarts.graphic.LinearGradient(1, 0, 0, 0, [
+                            {offset: 0, color: '#2196F3'},
+                            {offset: 1, color: '#64B5F6'}
+                        ]),
+                        borderRadius: [0, 4, 4, 0],
+                        borderWidth: 0
+                    },
+                    emphasis: {
+                        itemStyle: {
+                            shadowBlur: 20,
+                            shadowOffsetX: 0,
+                            shadowOffsetY: 6,
+                            shadowColor: 'rgba(33, 150, 243, 0.6)',
+                            opacity: 1
+                        }
+                    },
+                    label: {
+                        show: true,
+                        position: 'right',
+                        formatter: '{c:.2f}',
+                        color: isDark ? '#ffffff' : '#333333'
+                    }
+                }],
+                xAxis: {
+                    ...baseOption.xAxis,
+                    name: 'SPM'
+                }
+            };
+
+            spmChart.setOption(option, true);
+        }
+
+        function renderStarChart(data, isDark) {
+            if (!data || data.length === 0) {
+                starChart.clear();
+                document.getElementById('star-chart-container').style.display = 'none';
+                return;
+            }
+            document.getElementById('star-chart-container').style.display = 'block';
+
+            var names = data.map(d => d.name);
+            var values = data.map(d => d.value);
+            var baseOption = getBaseOption(isDark);
+
+            var option = {
+                ...baseOption,
+                yAxis: {
+                    ...baseOption.yAxis,
+                    data: names
+                },
+                series: [{
+                    data: values,
+                    type: 'bar',
+                    itemStyle: {
+                        color: new echarts.graphic.LinearGradient(1, 0, 0, 0, [
+                            {offset: 0, color: '#FF9800'},
+                            {offset: 1, color: '#FFCC80'}
+                        ]),
+                        borderRadius: [0, 4, 4, 0],
+                        borderWidth: 0
+                    },
+                    emphasis: {
+                        itemStyle: {
+                            shadowBlur: 20,
+                            shadowOffsetX: 0,
+                            shadowOffsetY: 6,
+                            shadowColor: 'rgba(255, 152, 0, 0.6)',
+                            opacity: 1
+                        }
+                    },
+                    label: {
+                        show: true,
+                        position: 'right',
+                        formatter: '{c:.2f}',
+                        color: isDark ? '#ffffff' : '#333333'
+                    }
+                }],
+                xAxis: {
+                    ...baseOption.xAxis,
+                    name: '星星/小时'
+                }
+            };
+
+            starChart.setOption(option, true);
+        }
+
+        function renderDailyIncomeChart(data, isDark) {
+            if (!data || data.length === 0) {
+                dailyIncomeChart.clear();
+                document.getElementById('daily-income-container').style.display = 'none';
+                return;
+            }
+            document.getElementById('daily-income-container').style.display = 'block';
+
+            var dates = data.map(d => d.date);
+            var values = data.map(d => d.value);
+            var baseOption = getBaseLineOption(isDark);
+
+            var option = {
+                ...baseOption,
+                xAxis: {
+                    ...baseOption.xAxis,
+                    data: dates
+                },
+                series: [{
+                    data: values,
+                    type: 'bar',
+                    itemStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            {offset: 0, color: '#FF9800'},
+                            {offset: 1, color: '#FFE082'}
+                        ]),
+                        borderRadius: [4, 4, 0, 0],
+                        borderWidth: 0
+                    },
+                    emphasis: {
+                        itemStyle: {
+                            shadowBlur: 20,
+                            shadowOffsetX: 0,
+                            shadowOffsetY: 6,
+                            shadowColor: 'rgba(255, 152, 0, 0.6)',
+                            opacity: 1
+                        }
+                    },
+                    label: {
+                        show: values.length <= 15,
+                        position: 'top',
+                        formatter: function(params) {
+                            return (params.value / 1000).toFixed(1) + 'k';
+                        },
+                        color: isDark ? '#ffffff' : '#333333'
+                    }
+                }],
+                yAxis: {
+                    ...baseOption.yAxis,
+                    name: '银币'
+                }
+            };
+
+            dailyIncomeChart.setOption(option, true);
+        }
+
+        function renderCumulativeChart(data, isDark) {
+            if (!data || data.length === 0) {
+                cumulativeChart.clear();
+                document.getElementById('cumulative-container').style.display = 'none';
+                return;
+            }
+            document.getElementById('cumulative-container').style.display = 'block';
+
+            var dates = data.map((d, i) => d.date);
+            var values = data.map(d => d.cumulative);
+            var baseOption = getBaseLineOption(isDark);
+
+            var step = Math.max(1, Math.floor(dates.length / 10));
+            var option = {
+                ...baseOption,
+                xAxis: {
+                    ...baseOption.xAxis,
+                    data: dates,
+                    interval: step
+                },
+                series: [{
+                    data: values,
+                    type: 'line',
+                    smooth: true,
+                    symbol: 'circle',
+                    symbolSize: 6,
+                    lineStyle: {
+                        width: 3,
+                        color: '#4CAF50'
+                    },
+                    areaStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            {offset: 0, color: 'rgba(76, 175, 80, 0.5)'},
+                            {offset: 1, color: 'rgba(76, 175, 80, 0.05)'}
+                        ])
+                    },
+                    emphasis: {
+                        lineStyle: {
+                            width: 4,
+                            shadowBlur: 15,
+                            shadowOffsetY: 4,
+                            shadowColor: 'rgba(76, 175, 80, 0.5)'
+                        },
+                        itemStyle: {
+                            symbolSize: 10,
+                            shadowBlur: 10,
+                            shadowColor: 'rgba(76, 175, 80, 0.5)'
+                        }
+                    },
+                    tooltip: {
+                        formatter: '{b}<br/>累计: {c}'
+                    }
+                }],
+                yAxis: {
+                    ...baseOption.yAxis,
+                    name: '累计银币'
+                }
+            };
+
+            cumulativeChart.setOption(option, true);
+        }
+
+        function renderTaskChart(data, isDark) {
+            if (!data || data.length === 0) {
+                taskChart.clear();
+                document.getElementById('task-container').style.display = 'none';
+                return;
+            }
+            document.getElementById('task-container').style.display = 'block';
+
+            var names = data.map(d => d.name);
+            var values = data.map(d => d.duration);
+            var colors = data.map(d => d.type === 'grinding' ? '#2196F3' : '#FF9800');
+            var baseOption = getBaseOption(isDark);
+
+            var option = {
+                ...baseOption,
+                yAxis: {
+                    ...baseOption.yAxis,
+                    data: names
+                },
+                series: [{
+                    data: values.map((v, i) => ({
+                        value: v,
+                        itemStyle: {
+                            color: colors[i]
+                        }
+                    })),
+                    type: 'bar',
+                    itemStyle: {
+                        borderRadius: [0, 4, 4, 0]
+                    },
+                    emphasis: {
+                        itemStyle: {
+                            shadowBlur: 15,
+                            shadowOffsetX: 0,
+                            shadowOffsetY: 4,
+                            shadowColor: 'rgba(33, 150, 243, 0.5)',
+                            opacity: 1
+                        }
+                    },
+                    label: {
+                        show: true,
+                        position: 'right',
+                        formatter: function(params) {
+                            return params.value.toFixed(1) + 'h';
+                        },
+                        color: isDark ? '#ffffff' : '#333333'
+                    }
+                }],
+                xAxis: {
+                    ...baseOption.xAxis,
+                    name: '时长(小时)'
+                }
+            };
+
+            taskChart.setOption(option, true);
+        }
+
+        function updateCharts(data, theme) {
+            chartData = data;
+            var isDark = theme === 'dark';
+            document.getElementById('body').className = theme;
+            currentTheme = theme;
+
+            // Enable progressive rendering with staggered animation start
+            setTimeout(function() { renderSPMChart(data.spm, isDark); }, 50);
+            setTimeout(function() { renderStarChart(data.star, isDark); }, 150);
+            setTimeout(function() { renderDailyIncomeChart(data.dailyIncome, isDark); }, 250);
+            setTimeout(function() { renderCumulativeChart(data.cumulative, isDark); }, 350);
+            setTimeout(function() { renderTaskChart(data.task, isDark); }, 450);
+
+            // Resize all charts after container rendered
+            setTimeout(function() {
+                spmChart.resize();
+                starChart.resize();
+                dailyIncomeChart.resize();
+                cumulativeChart.resize();
+                taskChart.resize();
+            }, 600);
+        }
+
+        function resizeAll() {
+            spmChart.resize();
+            starChart.resize();
+            dailyIncomeChart.resize();
+            cumulativeChart.resize();
+            taskChart.resize();
+        }
+
+        window.addEventListener('resize', resizeAll);
+
+        // Expose functions for Python to call
+        window.updateChartsFromPython = updateCharts;
+        window.resizeAll = resizeAll;
+    </script>
+</body>
+</html>

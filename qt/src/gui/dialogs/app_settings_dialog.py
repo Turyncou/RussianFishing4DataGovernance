@@ -3,7 +3,7 @@ import os
 import shutil
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
-    QSlider, QLineEdit, QFileDialog
+    QSlider, QLineEdit, QFileDialog, QComboBox
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -12,8 +12,8 @@ from PySide6.QtGui import QFont
 class AppSettingsDialog(QDialog):
     """Application settings dialog for all app settings"""
 
-    settings_changed = Signal(str, float, str, bool, str, str, str, bool, bool)
-    # (background_image_path, background_opacity, theme, show_income_info, start_hotkey, stop_hotkey, save_path, record_mic, record_system)
+    settings_changed = Signal(str, float, str, bool, str, str, str, bool, bool, bool)
+    # (background_image_path, background_opacity, theme, show_income_info, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor_on_hover)
 
     def __init__(self, parent=None,
                  current_path: str = None,
@@ -25,6 +25,7 @@ class AppSettingsDialog(QDialog):
                  current_save_path: str = None,
                  current_record_mic: bool = False,
                  current_record_system: bool = False,
+                 current_special_cursor: bool = True,
                  current_mic_device: str = None,
                  current_system_device: str = None):
         super().__init__(parent)
@@ -36,6 +37,7 @@ class AppSettingsDialog(QDialog):
         self.selected_save_path = current_save_path
         self.current_record_mic = current_record_mic
         self.current_record_system = current_record_system
+        self.current_special_cursor = current_special_cursor
         self.current_mic_device = current_mic_device
         self.current_system_device = current_system_device
         self.backgrounds_dir = None
@@ -105,6 +107,17 @@ class AppSettingsDialog(QDialog):
         income_layout.addWidget(self.show_income_checkbox)
         layout.addLayout(income_layout)
 
+        # Special cursor on hover checkbox
+        cursor_layout = QHBoxLayout()
+        self.special_cursor_checkbox = QCheckBox("鼠标悬停切换特殊指针")
+        self.special_cursor_checkbox.setChecked(current_special_cursor)
+        self.special_cursor_checkbox.setToolTip(
+            "鼠标移入窗口时自动切换为手型指针\n"
+            "移出后恢复箭头指针"
+        )
+        cursor_layout.addWidget(self.special_cursor_checkbox)
+        layout.addLayout(cursor_layout)
+
         # Screen Recorder Settings
         # Add separator
         separator = QLabel("────────────────────────────────────────")
@@ -168,7 +181,28 @@ class AppSettingsDialog(QDialog):
         )
         audio_layout.addWidget(self.record_system_checkbox)
 
+        # Audio device selection combo boxes
+        from PySide6.QtWidgets import QComboBox
+        device_layout = QVBoxLayout()
+        device_layout.addSpacing(8)
+        mic_layout = QHBoxLayout()
+        mic_layout.addWidget(QLabel("麦克风设备:"))
+        self.mic_device_combo = QComboBox()
+        mic_layout.addWidget(self.mic_device_combo)
+        device_layout.addLayout(mic_layout)
+
+        system_layout = QHBoxLayout()
+        system_layout.addWidget(QLabel("系统音频设备:"))
+        self.system_device_combo = QComboBox()
+        system_layout.addWidget(self.system_device_combo)
+        device_layout.addLayout(system_layout)
+
+        audio_layout.addLayout(device_layout)
+
         layout.addLayout(audio_layout)
+
+        # Populate devices after UI is created
+        self._populate_audio_devices()
 
         # Hotkey hint
         hotkey_hint = QLabel("快捷键格式说明: ctrl+shift+r, alt+s 等 (需要 keyboard 库支持)\n音频录制需要额外安装: pip install pyaudio sounddevice")
@@ -275,6 +309,7 @@ class AppSettingsDialog(QDialog):
         save_path = self.selected_save_path if self.selected_save_path else None
         record_mic = self.record_mic_checkbox.isChecked()
         record_system = self.record_system_checkbox.isChecked()
+        special_cursor = self.special_cursor_checkbox.isChecked()
 
         # Get selected device names
         mic_device = self.mic_device_combo.currentText()
@@ -291,13 +326,13 @@ class AppSettingsDialog(QDialog):
 
         if self.clear_checkbox.isChecked():
             # No background
-            self.settings_changed.emit(None, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system)
+            self.settings_changed.emit(None, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor)
             self.accept()
             return
 
         if not self.selected_image_path:
             # Nothing selected
-            self.settings_changed.emit(None, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system)
+            self.settings_changed.emit(None, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor)
             self.accept()
             return
 
@@ -322,5 +357,5 @@ class AppSettingsDialog(QDialog):
                 # If copy fails, just keep original path
                 pass
 
-        self.settings_changed.emit(self.selected_image_path, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system)
+        self.settings_changed.emit(self.selected_image_path, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor)
         self.accept()

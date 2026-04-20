@@ -90,6 +90,7 @@ class DesktopReminder(QMainWindow):
         self.bubble_always_top = True  # 气泡是否始终置顶
         self._bubble_anim_phase = 0
         self._bubble_anim_running = False
+        self._special_cursor_on_hover = True
 
         # Get screen geometry
         screen = self.screen()
@@ -607,6 +608,44 @@ class DesktopReminder(QMainWindow):
             self.show_bubble("当前：气泡始终置顶✓")
         else:
             self.show_bubble("当前：气泡不强制置顶\n可能被其他窗口覆盖")
+
+    def enterEvent(self, event):
+        """Mouse enters window - change to hand cursor if enabled"""
+        if self._special_cursor_on_hover:
+            from PySide6.QtGui import QCursor, QPixmap
+            import os
+            # Check for custom cursor files in assets directory
+            script_dir = os.path.abspath(os.path.dirname(__file__))
+            # Try .cur file first (Windows cursor format)
+            cur_path = os.path.join(script_dir, '..', '..', 'assets', 'custom_cursor.cur')
+            png_path = os.path.join(script_dir, '..', '..', 'assets', 'custom_cursor.png')
+
+            custom_cursor = None
+            if os.path.exists(cur_path):
+                # Load cursor from .cur file
+                pixmap = QPixmap(cur_path)
+                if not pixmap.isNull():
+                    # Use top-left as hotspot
+                    custom_cursor = QCursor(pixmap, 0, 0)
+            elif os.path.exists(png_path):
+                # Load cursor from .png file
+                pixmap = QPixmap(png_path)
+                if not pixmap.isNull():
+                    # Assume hotspot at top-left (0,0)
+                    # If you need different hotspot, you can modify this code
+                    custom_cursor = QCursor(pixmap, 0, 0)
+
+            if custom_cursor and not custom_cursor.pixmap().isNull():
+                self.setCursor(custom_cursor)
+            else:
+                # Fallback to default pointing hand cursor
+                self.setCursor(Qt.PointingHandCursor)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        """Mouse leaves window - revert to arrow cursor"""
+        self.setCursor(Qt.ArrowCursor)
+        super().leaveEvent(event)
 
 
 class BubbleWindow(QWidget):
