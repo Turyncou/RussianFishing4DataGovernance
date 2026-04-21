@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QHeaderView, QFrame
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtCore import QUrl, Qt
+from PySide6.QtCore import QUrl, Qt, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QFont
 
 from src.data.persistence import ActivityPersistence
@@ -547,9 +547,132 @@ class StatisticsFrame(QWidget):
 
         return sum(date_duration.values()) / len(date_duration)
 
+    def _create_heatmap_dots(self, progress_pct: float, is_dark: bool, base_color: str, empty_color: str):
+        """Create heatmap-style progress visualization
+        Continuous colored blocks with heat intensity gradient
+        """
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setSpacing(2)
+        layout.setContentsMargins(0, 10, 0, 10)
+
+        # 30 blocks for heatmap - creates smoother gradient effect
+        num_blocks = 30
+        filled_blocks = int(progress_pct * num_blocks / 100)
+        if progress_pct > 0 and filled_blocks == 0:
+            filled_blocks = 1
+
+        # Create heatmap blocks - intensity increases with progress
+        for i in range(num_blocks):
+            block = QLabel()
+            block.setFixedSize(1, 20)
+
+            if i < filled_blocks:
+                # Calculate intensity: earlier blocks are darker, later (newer) are lighter
+                # This creates a heat effect where the "front" glows brighter
+                intensity = i / max(filled_blocks - 1, 1) if filled_blocks > 1 else 0.5
+                lighten_amount = 0.1 + (intensity * 0.4)  # 0.1 (dark) to 0.5 (light)
+                color = self._lighten_color(base_color, lighten_amount)
+                block.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {color};
+                        border-radius: 1px;
+                    }}
+                """)
+            else:
+                # Empty blocks
+                if is_dark:
+                    bg_color = "rgba(255, 255, 255, 0.08)"
+                else:
+                    bg_color = empty_color
+                block.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {bg_color};
+                        border-radius: 1px;
+                    }}
+                """)
+            layout.addWidget(block)
+
+        # Add stretch to push percentage label to the right
+        layout.addStretch()
+
+        # Add percentage label at the end
+        pct_label = QLabel(f" {progress_pct:.1f}%")
+        pct_label.setFixedWidth(65)
+        pct_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        if is_dark:
+            pct_label.setStyleSheet("color: #e0e0e0; font-weight: bold; font-size: 13px;")
+        else:
+            pct_label.setStyleSheet("color: #444444; font-weight: bold; font-size: 13px;")
+        layout.addWidget(pct_label)
+
+        return container
+
+    def _lighten_color(self, color_hex, amount=0.3):
+        """Lighten a hex color by given amount (0-1)"""
+        # Handle rgba format - convert to hex
+        if color_hex.startswith('rgba'):
+            # For rgba, just return the original since we only lighten solid colors
+            return color_hex
+        # Remove # if present
+        color_hex = color_hex.lstrip('#')
+        # Convert to RGB
+        r = int(color_hex[0:2], 16)
+        g = int(color_hex[2:4], 16)
+        b = int(color_hex[4:6], 16)
+        # Lighten
+        r = int(r + (255 - r) * amount)
+        g = int(g + (255 - g) * amount)
+        b = int(b + (255 - b) * amount)
+        # Convert back to hex
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _create_thermal_heatmap(self, progress_pct: float, is_dark: bool, dark_color: str, light_color: str):
+        """Create a continuous thermal heatmap progress bar
+        Gradient effect from cold (dark color) to hot (light color) at the progress edge
+        Automatically expands to fill available width and resizes with window
+        """
+        from PySide6.QtWidgets import QSizePolicy
+        container = QWidget()
+        container.setFixedHeight(24)
+        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout = QHBoxLayout(container)
+        layout.setSpacing(1)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # 50 blocks for smooth thermal gradient effect - evenly distributed
+        num_blocks = 50
+        filled_blocks = int(progress_pct * num_blocks / 100)
+        if progress_pct > 0 and filled_blocks == 0:
+            filled_blocks = 1
+
+        for i in range(num_blocks):
+            block = QLabel()
+            block.setFixedHeight(24)
+            block.setMinimumWidth(1)
+            # All blocks get equal space, container handles the expanding
+            block.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+
+            if i < filled_blocks:
+                # Thermal gradient effect - from dark (older) to light (hotter at the edge)
+                intensity = i / max(filled_blocks - 1, 1) if filled_blocks > 1 else 0.5
+                lighten_amount = intensity * 0.4
+                color = self._lighten_color(dark_color, lighten_amount)
+                block.setStyleSheet(f"QLabel {{ background-color: {color}; border-radius: 2px; }}")
+            else:
+                # Empty background
+                if is_dark:
+                    bg_color = "rgba(255, 255, 255, 0.08)"
+                else:
+                    bg_color = "#e8e8e8"
+                block.setStyleSheet(f"QLabel {{ background-color: {bg_color}; border-radius: 2px; }}")
+            layout.addWidget(block)
+
+        return container
+
     def _plot_goal_progress(self):
         """Clear existing goal progress widgets and recreate
-        Shows both quantity progress and duration progress since they have separate income
+        Modern thermal heatmap progress - each goal is a clean card with full-width gradient
         """
         # Clear existing widgets
         for i in reversed(range(self.goal_layout.count())):
@@ -559,136 +682,217 @@ class StatisticsFrame(QWidget):
         self.goal_progress_widgets.clear()
 
         has_any_goal = False
+        window = self.window()
+        is_dark = True
+        if hasattr(window, '_current_theme'):
+            is_dark = (window._current_theme == "dark")
 
         for char in self.characters:
-            # Handle all grinding goals
-            for goal in char.grinding_goals:
-                has_any_goal = True
+            # Count total goals for this character
+            total_goals = len(char.grinding_goals) + len(char.star_waiting_goals)
+            if total_goals == 0:
+                continue
+
+            has_any_goal = True
+
+            # Character section header
+            char_header = QWidget()
+            header_layout = QHBoxLayout(char_header)
+            header_layout.setContentsMargins(4, 8, 4, 12)
+
+            char_title = QLabel(f"👤 {char.name}")
+            char_title.setFont(QFont("Segoe UI", 15, QFont.Bold))
+            if is_dark:
+                char_title.setStyleSheet("color: #ffffff;")
+            else:
+                char_title.setStyleSheet("color: #222222;")
+            header_layout.addWidget(char_title)
+            header_layout.addStretch()
+
+            goal_count_label = QLabel(f"{total_goals} 个目标")
+            if is_dark:
+                goal_count_label.setStyleSheet("color: #aaaaaa; font-size: 13px; background: rgba(255, 255, 255, 0.1); padding: 4px 10px; border-radius: 10px;")
+            else:
+                goal_count_label.setStyleSheet("color: #666666; font-size: 13px; background: #f0f0f0; padding: 4px 10px; border-radius: 10px;")
+            header_layout.addWidget(goal_count_label)
+            self.goal_layout.addWidget(char_header)
+
+            # Container for goals
+            goals_container = QWidget()
+            goals_layout = QVBoxLayout(goals_container)
+            goals_layout.setSpacing(16)
+            goals_layout.setContentsMargins(4, 0, 4, 20)
+
+            # Add all grinding goals
+            for goal_idx, goal in enumerate(char.grinding_goals):
                 total_value, total_duration, _ = char.calculate_totals(ActivityType.GRINDING)
 
-                # Calculate progress for both value (silver) and duration within this goal
-                # For multiple independent goals, each goal has its own target
-                # If target_value = 0 -> this is a duration-only goal, value progress is 100%
-                # If target_duration = 0 -> this is a quantity-only goal, duration progress is 100%
-                # All records contribute to both value and duration cumulative, so multiple goals progress simultaneously
+                # Calculate progress
                 progress_value_pct = (total_value / goal.target_value * 100) if goal.target_value > 0 else 100
                 progress_value_pct = min(progress_value_pct, 100)
                 progress_duration_pct = (total_duration / goal.target_duration * 100) if goal.target_duration > 0 else 100
                 progress_duration_pct = min(progress_duration_pct, 100)
 
-                # Calculate remaining for this goal
+                # Calculate remaining
                 remaining_value = max(0, goal.target_value - total_value) if goal.target_value > 0 else 0
                 remaining_duration = max(0, goal.target_duration - total_duration) if goal.target_duration > 0 else 0
 
-                # Calculate estimated remaining days based on average daily progress
-                # If it's a pure duration goal (target_value=0), predict based on remaining duration
-                # If it's a pure quantity goal (target_duration=0), predict based on remaining quantity
+                # Calculate estimated days
                 avg_daily_value = self._calculate_average_daily_progress(char, ActivityType.GRINDING)
                 avg_daily_duration = self._calculate_average_daily_duration(char, ActivityType.GRINDING)
                 remaining_days_text = ""
 
                 if goal.target_value > 0 and remaining_value > 0:
-                    # Predict based on quantity
                     if avg_daily_value > 0:
                         remaining_days = remaining_value / avg_daily_value
-                        remaining_days_text = f"预计还需 {remaining_days:.1f} 天"
+                        remaining_days_text = f"⏳ 预计还需 {remaining_days:.1f} 天"
                     else:
-                        remaining_days_text = "无法预测"
+                        remaining_days_text = "⏳ 无法预测"
                 elif goal.target_duration > 0 and remaining_duration > 0:
-                    # Predict based on duration (pure duration goal)
                     if avg_daily_duration > 0:
                         remaining_days = remaining_duration / avg_daily_duration
-                        remaining_days_text = f"预计还需 {remaining_days:.1f} 天"
+                        remaining_days_text = f"⏳ 预计还需 {remaining_days:.1f} 天"
                     else:
-                        remaining_days_text = "无法预测"
+                        remaining_days_text = "⏳ 无法预测"
                 else:
-                    remaining_days_text = "已完成"
+                    remaining_days_text = "🎉 已完成"
 
-                # Calculate remaining income based on both progresses
+                # Calculate remaining income
                 remaining_income = 0
                 if goal.total_income > 0:
-                    # Both value and duration need to be completed
-                    # Remaining income is proportional to the maximum of the two remaining progress
                     remaining_value_ratio = remaining_value / goal.target_value if goal.target_value > 0 else 0
                     remaining_duration_ratio = remaining_duration / goal.target_duration if goal.target_duration > 0 else 0
                     max_remaining_ratio = max(remaining_value_ratio, remaining_duration_ratio)
                     remaining_income = int(goal.total_income * max_remaining_ratio)
 
-                group = QGroupBox(f"{char.name} - 搬砖目标 #{char.grinding_goals.index(goal) + 1}")
-                layout = QVBoxLayout(group)
-                layout.setSpacing(8)
+                # Single goal card
+                goal_widget = QWidget()
+                goal_vbox = QVBoxLayout(goal_widget)
+                goal_vbox.setSpacing(8)
+                goal_vbox.setContentsMargins(12, 12, 12, 12)
 
-                # Quantity (silver) progress bar
-                progress_value_widget = QProgressBar()
-                progress_value_widget.setMinimum(0)
-                progress_value_widget.setMaximum(100)
-                progress_value_widget.setValue(int(progress_value_pct))
-                progress_value_widget.setTextVisible(True)
-                progress_value_widget.setFormat(f"数量: {progress_value_pct:.1f}% - {total_value:,} / {goal.target_value:,} 银币")
-                layout.addWidget(progress_value_widget)
+                # Top row: goal name + status tag
+                top_row = QWidget()
+                top_layout = QHBoxLayout(top_row)
+                top_layout.setContentsMargins(0, 0, 0, 4)
 
-                # Duration progress bar
-                progress_duration_widget = QProgressBar()
-                progress_duration_widget.setMinimum(0)
-                progress_duration_widget.setMaximum(100)
-                progress_duration_widget.setValue(int(progress_duration_pct))
-                progress_duration_widget.setTextVisible(True)
-                progress_duration_widget.setFormat(f"时长: {progress_duration_pct:.1f}% - {total_duration} / {goal.target_duration} 分钟")
-                layout.addWidget(progress_duration_widget)
+                goal_name = QLabel(f"🏭 搬砖目标 #{goal_idx + 1}")
+                goal_name.setFont(QFont("Segoe UI", 12, QFont.Bold))
+                if progress_value_pct >= 100 or progress_duration_pct >= 100:
+                    if is_dark:
+                        goal_name.setStyleSheet("color: #4CAF50;")
+                        status_text = "<span style='background: #4CAF50; color: white; padding: 3px 8px; border-radius: 8px; font-size: 11px;'>已完成</span>"
+                    else:
+                        goal_name.setStyleSheet("color: #4CAF50;")
+                        status_text = "<span style='background: #4CAF50; color: white; padding: 3px 8px; border-radius: 8px; font-size: 11px;'>已完成</span>"
+                else:
+                    if is_dark:
+                        goal_name.setStyleSheet("color: #ffffff;")
+                        status_text = "<span style='background: #2196F3; color: white; padding: 3px 8px; border-radius: 8px; font-size: 11px;'>进行中</span>"
+                    else:
+                        goal_name.setStyleSheet("color: #333333;")
+                        status_text = "<span style='background: #2196F3; color: white; padding: 3px 8px; border-radius: 8px; font-size: 11px;'>进行中</span>"
+                top_layout.addWidget(goal_name)
+                top_layout.addStretch()
+                status_label = QLabel()
+                status_label.setText(status_text)
+                top_layout.addWidget(status_label)
+                goal_vbox.addWidget(top_row)
 
-                # Build info text based on what's tracked
+                # Value progress with thermal heatmap
+                if goal.target_value > 0:
+                    stats_text = f"📊 {total_value:,} / {goal.target_value:,} 银币"
+                    stats_label = QLabel(stats_text)
+                    if is_dark:
+                        stats_label.setStyleSheet("color: #cccccc; font-size: 12px;")
+                    else:
+                        stats_label.setStyleSheet("color: #555555; font-size: 12px;")
+                    goal_vbox.addWidget(stats_label)
+                    heat_widget = self._create_thermal_heatmap(progress_value_pct, is_dark, "#1976D2", "#0D47A1")
+                    goal_vbox.addWidget(heat_widget)
+
+                # Duration progress with thermal heatmap
+                if goal.target_duration > 0:
+                    stats_text = f"⏱️ {total_duration} / {goal.target_duration} 分钟"
+                    stats_label = QLabel(stats_text)
+                    if is_dark:
+                        stats_label.setStyleSheet("color: #cccccc; font-size: 12px;")
+                    else:
+                        stats_label.setStyleSheet("color: #555555; font-size: 12px;")
+                    goal_vbox.addWidget(stats_label)
+                    heat_widget = self._create_thermal_heatmap(progress_duration_pct, is_dark, "#2E7D32", "#1B5E20")
+                    goal_vbox.addWidget(heat_widget)
+
+                # Bottom info row
                 info_parts = []
                 if goal.target_value > 0:
-                    info_parts.append(f"剩余银币: {remaining_value:,}")
+                    info_parts.append(f"剩余: {remaining_value:,} 银币")
                 if goal.total_income > 0:
-                    info_parts.append(f"剩余收入: {remaining_income:,}")
-                info_parts.append(remaining_days_text)
-                info_label = QLabel(" | ".join(info_parts))
-                layout.addWidget(info_label)
+                    info_parts.append(f"预期剩余收入: {remaining_income:,}")
+                info_text = " • ".join(info_parts + [remaining_days_text])
+                info_label = QLabel(info_text)
+                if is_dark:
+                    info_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
+                else:
+                    info_label.setStyleSheet("color: #666666; font-size: 11px;")
+                goal_vbox.addWidget(info_label)
 
-                self.goal_layout.addWidget(group)
-                self.goal_progress_widgets.append((group, progress_value_widget, progress_duration_widget, info_label))
+                # Card styling
+                if is_dark:
+                    goal_widget.setStyleSheet("""
+                        QWidget {
+                            border-radius: 12px;
+                            background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+                            border: 1px solid rgba(255, 255, 255, 0.08);
+                        }
+                    """)
+                else:
+                    goal_widget.setStyleSheet("""
+                        QWidget {
+                            border-radius: 12px;
+                            background: linear-gradient(135deg, #ffffff 0%, #fafafa 100%);
+                            border: 1px solid rgba(0, 0, 0, 0.06);
+                            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+                        }
+                    """)
+                goals_layout.addWidget(goal_widget)
+                self.goal_progress_widgets.append((goal_widget, None, None, info_label))
 
-            # Handle all star waiting goals
-            for goal in char.star_waiting_goals:
-                has_any_goal = True
+            # Add all star waiting goals
+            for goal_idx, goal in enumerate(char.star_waiting_goals):
                 total_value, total_duration, _ = char.calculate_totals(ActivityType.STAR_WAITING)
 
-                # Calculate progress for both value (star count) and duration within this goal
+                # Calculate progress
                 progress_value_pct = (total_value / goal.target_value * 100) if goal.target_value > 0 else 100
                 progress_value_pct = min(progress_value_pct, 100)
                 progress_duration_pct = (total_duration / goal.target_duration * 100) if goal.target_duration > 0 else 100
                 progress_duration_pct = min(progress_duration_pct, 100)
 
-                # Calculate remaining for this goal
+                # Calculate remaining
                 remaining_value = max(0, goal.target_value - total_value) if goal.target_value > 0 else 0
                 remaining_duration = max(0, goal.target_duration - total_duration) if goal.target_duration > 0 else 0
 
-                # Calculate estimated remaining days
-                # If it's a pure duration goal (target_value=0), predict based on remaining duration
-                # If it's a pure quantity goal (target_duration=0), predict based on remaining quantity
+                # Calculate estimated days
                 avg_daily_value = self._calculate_average_daily_progress(char, ActivityType.STAR_WAITING)
                 avg_daily_duration = self._calculate_average_daily_duration(char, ActivityType.STAR_WAITING)
                 remaining_days_text = ""
 
                 if goal.target_value > 0 and remaining_value > 0:
-                    # Predict based on quantity
                     if avg_daily_value > 0:
                         remaining_days = remaining_value / avg_daily_value
-                        remaining_days_text = f"预计还需 {remaining_days:.1f} 天"
+                        remaining_days_text = f"⏳ 预计还需 {remaining_days:.1f} 天"
                     else:
-                        remaining_days_text = "无法预测"
+                        remaining_days_text = "⏳ 无法预测"
                 elif goal.target_duration > 0 and remaining_duration > 0:
-                    # Predict based on duration (pure duration goal)
                     if avg_daily_duration > 0:
                         remaining_days = remaining_duration / avg_daily_duration
-                        remaining_days_text = f"预计还需 {remaining_days:.1f} 天"
+                        remaining_days_text = f"⏳ 预计还需 {remaining_days:.1f} 天"
                     else:
-                        remaining_days_text = "无法预测"
+                        remaining_days_text = "⏳ 无法预测"
                 else:
-                    remaining_days_text = "已完成"
+                    remaining_days_text = "🎉 已完成"
 
-                # Calculate remaining income based on both progresses
+                # Calculate remaining income
                 remaining_income = 0
                 if goal.total_income > 0:
                     remaining_value_ratio = remaining_value / goal.target_value if goal.target_value > 0 else 0
@@ -696,48 +900,105 @@ class StatisticsFrame(QWidget):
                     max_remaining_ratio = max(remaining_value_ratio, remaining_duration_ratio)
                     remaining_income = int(goal.total_income * max_remaining_ratio)
 
-                group = QGroupBox(f"{char.name} - 蹲星目标 #{char.star_waiting_goals.index(goal) + 1}")
-                layout = QVBoxLayout(group)
-                layout.setSpacing(8)
+                # Single goal card
+                goal_widget = QWidget()
+                goal_vbox = QVBoxLayout(goal_widget)
+                goal_vbox.setSpacing(8)
+                goal_vbox.setContentsMargins(12, 12, 12, 12)
 
-                # Quantity (star count) progress bar
-                progress_value_widget = QProgressBar()
-                progress_value_widget.setMinimum(0)
-                progress_value_widget.setMaximum(100)
-                progress_value_widget.setValue(int(progress_value_pct))
-                progress_value_widget.setTextVisible(True)
-                progress_value_widget.setFormat(f"数量: {progress_value_pct:.1f}% - {total_value} / {goal.target_value} 星星")
-                layout.addWidget(progress_value_widget)
+                # Top row: goal name + status tag
+                top_row = QWidget()
+                top_layout = QHBoxLayout(top_row)
+                top_layout.setContentsMargins(0, 0, 0, 4)
 
-                # Duration progress bar
-                progress_duration_widget = QProgressBar()
-                progress_duration_widget.setMinimum(0)
-                progress_duration_widget.setMaximum(100)
-                progress_duration_widget.setValue(int(progress_duration_pct))
-                progress_duration_widget.setTextVisible(True)
-                progress_duration_widget.setFormat(f"时长: {progress_duration_pct:.1f}% - {total_duration} / {goal.target_duration} 分钟")
-                layout.addWidget(progress_duration_widget)
+                goal_name = QLabel(f"⭐ 蹲星目标 #{goal_idx + 1}")
+                goal_name.setFont(QFont("Segoe UI", 12, QFont.Bold))
+                if progress_value_pct >= 100 or progress_duration_pct >= 100:
+                    if is_dark:
+                        goal_name.setStyleSheet("color: #4CAF50;")
+                        status_text = "<span style='background: #4CAF50; color: white; padding: 3px 8px; border-radius: 8px; font-size: 11px;'>已完成</span>"
+                    else:
+                        goal_name.setStyleSheet("color: #4CAF50;")
+                        status_text = "<span style='background: #4CAF50; color: white; padding: 3px 8px; border-radius: 8px; font-size: 11px;'>已完成</span>"
+                else:
+                    if is_dark:
+                        goal_name.setStyleSheet("color: #ffffff;")
+                        status_text = "<span style='background: #FF9800; color: white; padding: 3px 8px; border-radius: 8px; font-size: 11px;'>进行中</span>"
+                    else:
+                        goal_name.setStyleSheet("color: #333333;")
+                        status_text = "<span style='background: #FF9800; color: white; padding: 3px 8px; border-radius: 8px; font-size: 11px;'>进行中</span>"
+                top_layout.addWidget(goal_name)
+                top_layout.addStretch()
+                status_label = QLabel()
+                status_label.setText(status_text)
+                top_layout.addWidget(status_label)
+                goal_vbox.addWidget(top_row)
 
-                # Build info text based on what's tracked
+                # Value progress with thermal heatmap (warm orange for stars)
+                if goal.target_value > 0:
+                    stats_text = f"📊 {total_value} / {goal.target_value} 星星"
+                    stats_label = QLabel(stats_text)
+                    if is_dark:
+                        stats_label.setStyleSheet("color: #cccccc; font-size: 12px;")
+                    else:
+                        stats_label.setStyleSheet("color: #555555; font-size: 12px;")
+                    goal_vbox.addWidget(stats_label)
+                    heat_widget = self._create_thermal_heatmap(progress_value_pct, is_dark, "#F57C00", "#E65100")
+                    goal_vbox.addWidget(heat_widget)
+
+                # Duration progress
+                if goal.target_duration > 0:
+                    stats_text = f"⏱️ {total_duration} / {goal.target_duration} 分钟"
+                    stats_label = QLabel(stats_text)
+                    if is_dark:
+                        stats_label.setStyleSheet("color: #cccccc; font-size: 12px;")
+                    else:
+                        stats_label.setStyleSheet("color: #555555; font-size: 12px;")
+                    goal_vbox.addWidget(stats_label)
+                    heat_widget = self._create_thermal_heatmap(progress_duration_pct, is_dark, "#F57C00", "#E65100")
+                    goal_vbox.addWidget(heat_widget)
+
+                # Bottom info row
                 info_parts = []
                 if goal.target_value > 0:
-                    info_parts.append(f"剩余星星: {remaining_value}")
+                    info_parts.append(f"剩余: {remaining_value} 星星")
                 if goal.total_income > 0:
-                    info_parts.append(f"剩余收入: {remaining_income:,}")
-                info_parts.append(remaining_days_text)
-                info_label = QLabel(" | ".join(info_parts))
-                layout.addWidget(info_label)
+                    info_parts.append(f"预期剩余收入: {remaining_income:,}")
+                info_text = " • ".join(info_parts + [remaining_days_text])
+                info_label = QLabel(info_text)
+                if is_dark:
+                    info_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
+                else:
+                    info_label.setStyleSheet("color: #666666; font-size: 11px;")
+                goal_vbox.addWidget(info_label)
 
-                self.goal_layout.addWidget(group)
-                self.goal_progress_widgets.append((group, progress_value_widget, progress_duration_widget, info_label))
+                # Card styling
+                if is_dark:
+                    goal_widget.setStyleSheet("""
+                        QWidget {
+                            border-radius: 12px;
+                            background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+                            border: 1px solid rgba(255, 255, 255, 0.08);
+                        }
+                    """)
+                else:
+                    goal_widget.setStyleSheet("""
+                        QWidget {
+                            border-radius: 12px;
+                            background: linear-gradient(135deg, #ffffff 0%, #fafafa 100%);
+                            border: 1px solid rgba(0, 0, 0, 0.06);
+                            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+                        }
+                    """)
+                goals_layout.addWidget(goal_widget)
+                self.goal_progress_widgets.append((goal_widget, None, None, info_label))
+
+            # Add goals container to layout
+            self.goal_layout.addWidget(goals_container)
 
         if not has_any_goal:
             label = QLabel("暂无目标设置\n请在活动统计页面为角色设置目标")
             label.setAlignment(Qt.AlignCenter)
-            window = self.window()
-            is_dark = True
-            if hasattr(window, '_current_theme'):
-                is_dark = (window._current_theme == "dark")
             if is_dark:
                 label.setStyleSheet("color: #aaaaaa;")
             else:
@@ -813,3 +1074,103 @@ class StatisticsFrame(QWidget):
         # Refresh charts with new theme
         if self.html_loaded:
             self._update_charts_html()
+
+    def mousePressEvent(self, event):
+        """Forward mouse press to main window for resizing"""
+        from PySide6.QtCore import Qt, QPointF
+        from PySide6.QtGui import QMouseEvent
+        window = self.window()
+        if event.button() == Qt.LeftButton and hasattr(window, '_get_resize_direction'):
+            # Convert to window coordinates
+            original_pos = event.position().toPoint()
+            local_pos = self.mapTo(window, original_pos)
+            w = window.width()
+            h = window.height()
+            print(f"[DEBUG {self.__class__.__name__}] mousePress: original=({original_pos.x()}, {original_pos.y()}), window=({local_pos.x()}, {local_pos.y()}), window_size=({w}, {h})")
+
+            direction = window._get_resize_direction(local_pos)
+            print(f"[DEBUG {self.__class__.__name__}] direction: {direction}")
+
+            if direction is not None:
+                # Create new event with corrected coordinates
+                new_event = QMouseEvent(
+                    event.type(),
+                    QPointF(local_pos),
+                    event.globalPosition(),
+                    event.button(),
+                    event.buttons(),
+                    event.modifiers()
+                )
+                window.mousePressEvent(new_event)
+                if new_event.isAccepted():
+                    print(f"[DEBUG {self.__class__.__name__}] event accepted by main window")
+                    event.accept()
+                    return
+            else:
+                print(f"[DEBUG {self.__class__.__name__}] no direction, pass through")
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Forward mouse move to main window for resizing"""
+        from PySide6.QtCore import Qt, QPointF
+        from PySide6.QtGui import QMouseEvent
+        window = self.window()
+        if hasattr(window, '_get_resize_direction'):
+            # Convert to window coordinates
+            original_pos = event.position().toPoint()
+            local_pos = self.mapTo(window, original_pos)
+
+            if (event.buttons() & Qt.LeftButton) and hasattr(window, '_resize_direction'):
+                if window._resize_direction is not None:
+                    # We are already resizing - always forward
+                    new_event = QMouseEvent(
+                        event.type(),
+                        QPointF(local_pos),
+                        event.globalPosition(),
+                        event.button(),
+                        event.buttons(),
+                        event.modifiers()
+                    )
+                    window.mouseMoveEvent(new_event)
+                    if new_event.isAccepted():
+                        event.accept()
+                        return
+            else:
+                # Check if we are on the edge for cursor change
+                direction = window._get_resize_direction(local_pos)
+                if direction is not None:
+                    new_event = QMouseEvent(
+                        event.type(),
+                        QPointF(local_pos),
+                        event.globalPosition(),
+                        event.button(),
+                        event.buttons(),
+                        event.modifiers()
+                    )
+                    window.mouseMoveEvent(new_event)
+                    if new_event.isAccepted():
+                        event.accept()
+                        return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """Forward mouse release to main window for resizing"""
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QMouseEvent
+        window = self.window()
+        if hasattr(window, '_resize_direction') and window._resize_direction is not None:
+            # Convert to window coordinates
+            local_pos = self.mapTo(window, event.position().toPoint())
+            new_event = QMouseEvent(
+                event.type(),
+                QPointF(local_pos),
+                event.globalPosition(),
+                event.button(),
+                event.buttons(),
+                event.modifiers()
+            )
+            window.mouseReleaseEvent(new_event)
+            if new_event.isAccepted():
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)

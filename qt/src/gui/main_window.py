@@ -1002,6 +1002,8 @@ class MainWindow(QMainWindow):
         bottom_layout = QHBoxLayout(self.bottom_bar)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
 
+# Remove the resize detector - we handle it directly in main window event() now
+
         # Backup button
         backup_button = QPushButton("💾 备份恢复")
         backup_button.setFixedWidth(120)
@@ -1467,30 +1469,39 @@ class MainWindow(QMainWindow):
             self._background_label.show()
             return
 
-        from PySide6.QtGui import QPainter, QColor
-        # Create new background label that covers the entire central widget
-        self._background_label = QLabel(self.central_widget)
-        pixmap = QPixmap(self._background_image_path)
-        if not pixmap.isNull():
-            # Scale pixmap to fit window
-            scaled_pixmap = pixmap.scaled(
-                self.central_widget.size(),
-                Qt.KeepAspectRatioByExpanding,
-                Qt.SmoothTransformation
-            )
+        # Custom background label that keeps the original pixmap and auto-scales on paint
+        from PySide6.QtGui import QPainter, QColor, QPixmap
+        class BackgroundLabel(QLabel):
+            def __init__(self, original_pixmap, opacity, parent=None):
+                super().__init__(parent)
+                self._original_pixmap = original_pixmap
+                self._opacity = opacity
 
-            # Apply opacity by drawing on the pixmap itself
-            result = QPixmap(scaled_pixmap.size())
-            result.fill(QColor(0, 0, 0, 0))
-            painter = QPainter(result)
-            painter.setOpacity(self._background_opacity)
-            painter.drawPixmap(0, 0, scaled_pixmap)
-            painter.end()
+            def paintEvent(self, event):
+                # Auto-scale to current label size during paint
+                painter = QPainter(self)
+                painter.setOpacity(self._opacity)
+                scaled = self._original_pixmap.scaled(
+                    self.size(),
+                    Qt.KeepAspectRatioByExpanding,
+                    Qt.SmoothTransformation
+                )
+                # Center the scaled image
+                x = (self.width() - scaled.width()) // 2
+                y = (self.height() - scaled.height()) // 2
+                painter.drawPixmap(x, y, scaled)
+                painter.end()
 
-            # Set to label
-            self._background_label.setPixmap(result)
+        # Load original pixmap once - keep it in memory
+        original_pixmap = QPixmap(self._background_image_path)
+        if not original_pixmap.isNull():
+            # Create custom background label
+            self._background_label = BackgroundLabel(original_pixmap, self._background_opacity, self.central_widget)
             self._background_label.resize(self.central_widget.size())
             self._background_label.setAutoFillBackground(False)
+            # Absolutely critical: do NOT allow mouse to pass through this widget
+            self._background_label.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+            self._background_label.setAttribute(Qt.WA_OpaquePaintEvent, False)
             # Background goes below all other content
             self._background_label.lower()
             self._background_label.show()
@@ -1512,9 +1523,11 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         """Handle window resize to update background scaling"""
         super().resizeEvent(event)
+        # Just update label size - background will automatically scale on paint
         if self._background_label:
-            # Always update background - even when no image to keep size correct
-            self._update_background()
+            self._background_label.resize(self.central_widget.size())
+            # Trigger repaint - scaling is done in paintEvent
+            self._background_label.update()
 
     def _get_resize_direction(self, pos):
         """Determine which edge/corner the mouse is over for resizing"""
@@ -1556,7 +1569,9 @@ class MainWindow(QMainWindow):
             if self._resize_direction is not None:
                 # Start resizing
                 self._resize_start_pos = event.globalPosition().toPoint()
-                self._resize_start_geometry = self.frameGeometry()
+                self._resize_start_geometry = self.geometry()
+                # Grab mouse so we get events even if it moves outside the window
+                self.grabMouse()
                 event.accept()
                 return
 
@@ -1565,6 +1580,8 @@ class MainWindow(QMainWindow):
             child = self.childAt(event.position().toPoint())
             if child is None or isinstance(child, QLabel) or child == self.nav_bar or child == self.bottom_bar:
                 self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                # Also grab mouse for dragging to get events outside window
+                self.grabMouse()
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -1573,37 +1590,54 @@ class MainWindow(QMainWindow):
 
         if event.buttons() == Qt.LeftButton:
             if self._resize_direction is not None:
-                # Handle resizing
-                delta = event.globalPosition().toPoint() - self._resize_start_pos
-                geo = self._resize_start_geometry
-                dx = delta.x()
-                dy = delta.y()
+                # Get current mouse position in global screen coordinates
+                mouse_global = event.globalPosition().toPoint()
 
-                new_geo = geo
+                # Get the starting geometry (from when mouse was first pressed)
+                start = self._resize_start_geometry
+                if not start:
+                    event.accept()
+                    return
 
-                # Adjust based on which edge we're dragging
+                # Initialize with starting values
+                new_x = start.x()
+                new_y = start.y()
+                new_right = start.x() + start.width()
+                new_bottom = start.y() + start.height()
+
+                # Directly set the edge being dragged to current mouse position
+                # This guarantees the dragged edge is always exactly under the mouse
                 if 'left' in self._resize_direction:
-                    new_left = geo.left() + dx
-                    new_width = geo.width() - dx
-                    if new_width >= self.minimumWidth():
-                        new_geo.setLeft(new_left)
-                        new_geo.setWidth(new_width)
+                    new_x = mouse_global.x()
                 if 'right' in self._resize_direction:
-                    new_width = geo.width() + dx
-                    if new_width >= self.minimumWidth():
-                        new_geo.setWidth(new_width)
+                    new_right = mouse_global.x()
                 if 'top' in self._resize_direction:
-                    new_top = geo.top() + dy
-                    new_height = geo.height() - dy
-                    if new_height >= self.minimumHeight():
-                        new_geo.setTop(new_top)
-                        new_geo.setHeight(new_height)
+                    new_y = mouse_global.y()
                 if 'bottom' in self._resize_direction:
-                    new_height = geo.height() + dy
-                    if new_height >= self.minimumHeight():
-                        new_geo.setHeight(new_height)
+                    new_bottom = mouse_global.y()
 
-                self.setGeometry(new_geo)
+                # Calculate new dimensions
+                new_width = new_right - new_x
+                new_height = new_bottom - new_y
+
+                # Apply minimum size constraints
+                if new_width < self.minimumWidth():
+                    # If we're dragging left edge, fix it to maintain minimum width
+                    if 'left' in self._resize_direction:
+                        new_x = new_right - self.minimumWidth()
+                    else:
+                        new_right = new_x + self.minimumWidth()
+                    new_width = self.minimumWidth()
+
+                if new_height < self.minimumHeight():
+                    if 'top' in self._resize_direction:
+                        new_y = new_bottom - self.minimumHeight()
+                    else:
+                        new_bottom = new_y + self.minimumHeight()
+                    new_height = self.minimumHeight()
+
+                print(f"[resize] direction={self._resize_direction}, mouse=({mouse_global.x()},{mouse_global.y()}), result=({new_width}x{new_height})")
+                self.setGeometry(new_x, new_y, new_width, new_height)
                 event.accept()
                 return
 
@@ -1631,6 +1665,8 @@ class MainWindow(QMainWindow):
         self._resize_direction = None
         self._resize_start_pos = None
         self._resize_start_geometry = None
+        # Release mouse capture
+        self.releaseMouse()
         # Reset cursor
         self.setCursor(Qt.ArrowCursor)
         event.accept()
@@ -1785,3 +1821,34 @@ class MainWindow(QMainWindow):
         """Mouse leaves window - revert to arrow cursor"""
         self.setCursor(Qt.ArrowCursor)
         super().leaveEvent(event)
+
+    def event(self, event):
+        """Override main window event to handle resize detection before it goes to child widgets
+        This guarantees edge resize always works regardless of content layout
+        """
+        from PySide6.QtGui import QMouseEvent
+        from PySide6.QtCore import Qt
+
+        # Handle mouse events first for resize detection
+        if event.type() in [
+            QMouseEvent.MouseButtonPress,
+            QMouseEvent.MouseMove,
+            QMouseEvent.MouseButtonRelease
+        ]:
+            me = event
+            local_pos = me.position().toPoint()
+            direction = self._get_resize_direction(local_pos)
+
+            if direction is not None or self._resize_direction is not None:
+                # We need to handle this resize
+                if event.type() == QMouseEvent.MouseButtonPress:
+                    self.mousePressEvent(me)
+                elif event.type() == QMouseEvent.MouseMove:
+                    self.mouseMoveEvent(me)
+                elif event.type() == QMouseEvent.MouseButtonRelease:
+                    self.mouseReleaseEvent(me)
+                # Event handled - don't pass to children
+                return True
+
+        # Let other events through normally
+        return super().event(event)

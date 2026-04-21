@@ -134,8 +134,6 @@ class StorageFrame(QWidget):
         control_layout.addLayout(input_layout)
         layout.addWidget(control_group)
 
-        self.setLayout(layout)
-
     def load_data(self):
         """Load data from persistence"""
         self.characters = self.persistence.load_characters()
@@ -274,6 +272,78 @@ class StorageFrame(QWidget):
                         padding: 6px;
                     }
                 """)
+
+    def mousePressEvent(self, event):
+        """Forward mouse press to main window for resizing"""
+        from PySide6.QtCore import Qt, QPointF
+        from PySide6.QtGui import QMouseEvent
+        window = self.window()
+        if event.button() == Qt.LeftButton and hasattr(window, '_get_resize_direction'):
+            # Convert to window coordinates
+            local_pos = self.mapTo(window, event.position().toPoint())
+            global_pos = event.globalPosition()
+            # Create new event with corrected coordinates
+            new_event = QMouseEvent(
+                event.type(),
+                QPointF(local_pos),
+                event.globalPosition(),
+                event.button(),
+                event.buttons(),
+                event.modifiers()
+            )
+            window.mousePressEvent(new_event)
+            if new_event.isAccepted():
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Forward mouse move to main window for resizing"""
+        from PySide6.QtCore import Qt, QPointF
+        from PySide6.QtGui import QMouseEvent
+        window = self.window()
+        if hasattr(window, '_get_resize_direction'):
+            # Convert to window coordinates
+            local_pos = self.mapTo(window, event.position().toPoint())
+            global_pos = event.globalPosition()
+            # Create new event with corrected coordinates
+            new_event = QMouseEvent(
+                event.type(),
+                QPointF(local_pos),
+                event.globalPosition(),
+                event.button(),
+                event.buttons(),
+                event.modifiers()
+            )
+            window.mouseMoveEvent(new_event)
+            if new_event.isAccepted():
+                event.accept()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """Forward mouse release to main window for resizing"""
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QMouseEvent
+        window = self.window()
+        if hasattr(window, '_get_resize_direction'):
+            # Convert to window coordinates
+            local_pos = self.mapTo(window, event.position().toPoint())
+            global_pos = event.globalPosition()
+            # Create new event with corrected coordinates
+            new_event = QMouseEvent(
+                event.type(),
+                QPointF(local_pos),
+                event.globalPosition(),
+                event.button(),
+                event.buttons(),
+                event.modifiers()
+            )
+            window.mouseReleaseEvent(new_event)
+            if new_event.isAccepted():
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
 
 
 class AddStorageCharacterDialog(QDialog):
