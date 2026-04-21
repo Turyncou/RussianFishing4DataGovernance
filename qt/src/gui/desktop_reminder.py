@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import (
     QPainter, QBrush, QPen, QColor, QMouseEvent, QFont, QPaintEvent,
-    QRegion, QAction
+    QRegion, QAction, QCursor, QPixmap
 )
 from PySide6.QtCore import (
     Qt, QPoint, QTimer, QRect, QSize, Signal
@@ -91,6 +91,10 @@ class DesktopReminder(QMainWindow):
         self._bubble_anim_phase = 0
         self._bubble_anim_running = False
         self._special_cursor_on_hover = True
+
+        # Cached custom cursor to avoid repeated disk reads
+        self._custom_cursor = None
+        self._custom_cursor_loaded = False
 
         # Get screen geometry
         screen = self.screen()
@@ -609,34 +613,40 @@ class DesktopReminder(QMainWindow):
         else:
             self.show_bubble("当前：气泡不强制置顶\n可能被其他窗口覆盖")
 
+    def _load_custom_cursor(self):
+        """Load custom cursor once and cache it to avoid repeated disk reads"""
+        if self._custom_cursor_loaded:
+            return
+
+        import os
+        # Check for custom cursor files in assets directory
+        script_dir = os.path.abspath(os.path.dirname(__file__))
+        # Try .cur file first (Windows cursor format)
+        cur_path = os.path.join(script_dir, '..', '..', 'assets', 'custom_cursor.cur')
+        png_path = os.path.join(script_dir, '..', '..', 'assets', 'custom_cursor.png')
+
+        if os.path.exists(cur_path):
+            # Load cursor from .cur file
+            pixmap = QPixmap(cur_path)
+            if not pixmap.isNull():
+                # Use top-left as hotspot
+                self._custom_cursor = QCursor(pixmap, 0, 0)
+        elif os.path.exists(png_path):
+            # Load cursor from .png file
+            pixmap = QPixmap(png_path)
+            if not pixmap.isNull():
+                # Assume hotspot at top-left (0,0)
+                # If you need different hotspot, you can modify this code
+                self._custom_cursor = QCursor(pixmap, 0, 0)
+
+        self._custom_cursor_loaded = True
+
     def enterEvent(self, event):
         """Mouse enters window - change to hand cursor if enabled"""
         if self._special_cursor_on_hover:
-            from PySide6.QtGui import QCursor, QPixmap
-            import os
-            # Check for custom cursor files in assets directory
-            script_dir = os.path.abspath(os.path.dirname(__file__))
-            # Try .cur file first (Windows cursor format)
-            cur_path = os.path.join(script_dir, '..', '..', 'assets', 'custom_cursor.cur')
-            png_path = os.path.join(script_dir, '..', '..', 'assets', 'custom_cursor.png')
-
-            custom_cursor = None
-            if os.path.exists(cur_path):
-                # Load cursor from .cur file
-                pixmap = QPixmap(cur_path)
-                if not pixmap.isNull():
-                    # Use top-left as hotspot
-                    custom_cursor = QCursor(pixmap, 0, 0)
-            elif os.path.exists(png_path):
-                # Load cursor from .png file
-                pixmap = QPixmap(png_path)
-                if not pixmap.isNull():
-                    # Assume hotspot at top-left (0,0)
-                    # If you need different hotspot, you can modify this code
-                    custom_cursor = QCursor(pixmap, 0, 0)
-
-            if custom_cursor and not custom_cursor.pixmap().isNull():
-                self.setCursor(custom_cursor)
+            self._load_custom_cursor()
+            if self._custom_cursor:
+                self.setCursor(self._custom_cursor)
             else:
                 # Fallback to default pointing hand cursor
                 self.setCursor(Qt.PointingHandCursor)
