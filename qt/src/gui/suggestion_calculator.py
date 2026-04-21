@@ -526,13 +526,16 @@ def generate_recommendation(
                 if r.activity_type == ActivityType.STAR_WAITING:
                     total_s_dur += r.duration_minutes
 
-            # Sum remaining duration across all incomplete goals
+            # Sum remaining duration and value across all incomplete goals
             rem_g = 0.0
+            rem_g_val = 0
             for goal in char.grinding_goals:
                 if goal.target_duration > 0 and goal.current_progress < goal.target_value:
                     rem_g += max(0, goal.target_duration - total_g_dur)
+                    rem_g_val += max(0, goal.target_value - goal.current_progress)
 
             rem_s = 0.0
+            rem_s_val = 0
             for goal in char.star_waiting_goals:
                 # Fish name targets are NEVER included in recommendation calculation
                 if goal.fish_name is not None:
@@ -540,6 +543,7 @@ def generate_recommendation(
                 # Only non-fish targets (duration-based) are included
                 if goal.target_duration > 0 and goal.current_progress < goal.target_value:
                     rem_s += max(0, goal.target_duration - total_s_dur)
+                    rem_s_val += max(0, goal.target_value - goal.current_progress)
 
             # 每日任务要求
             req_g = 0.0
@@ -648,16 +652,16 @@ def generate_recommendation(
 
         # 构建表格，使用最终结果
         # print(f"[DEBUG] === Final allocations after all constraints: ===")
-        # for alloc in allocs:
-        #     char = alloc['char']
-        #     char_g_daily = alloc['g']
-        #     char_s_daily = alloc['s']
-        #     total_g_duration = alloc['total_g_dur']
-        #     total_s_duration = alloc['total_s_dur']
-        #     remaining_g_value = alloc['rem_g_val']
-        #     remaining_s_value = alloc['rem_s_val']
+        for alloc in allocs:
+            char = alloc['char']
+            char_g_daily = alloc['g']
+            char_s_daily = alloc['s']
+            total_g_duration = alloc['total_g_dur']
+            total_s_duration = alloc['total_s_dur']
+            remaining_g_value = alloc['rem_g_val']
+            remaining_s_value = alloc['rem_s_val']
 
-        #     print(f"[DEBUG] Final {char.name}: g={char_g_daily:.0f}, s={char_s_daily:.0f}, sum={char_g_daily+char_s_daily:.0f}")
+            # print(f"[DEBUG] Final {char.name}: g={char_g_daily:.0f}, s={char_s_daily:.0f}, sum={char_g_daily+char_s_daily:.0f}")
 
             # Skip if no activity after projection
             if char_g_daily <= 0.1 and char_s_daily <= 0.1:

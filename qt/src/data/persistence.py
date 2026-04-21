@@ -210,12 +210,14 @@ class ActivityPersistence(DataPersistence):
 
     def load_characters(self) -> tuple[List[ActivityCharacter], SuggestionUserSettings | None]:
         """Load activity characters from file, returns (characters, global_suggestion_settings)
-        Only loads today's records into memory for activity statistics page
+        Loads all records - data size is small enough for modern systems, keeps progress correct
         """
-        return self._load_characters_internal(only_today=True)
+        return self._load_characters_internal(only_today=False)
 
     def load_all_characters(self) -> tuple[List[ActivityCharacter], SuggestionUserSettings | None]:
-        """Load activity characters from file with ALL records (for statistics/analysis page)"""
+        """Load activity characters from file with ALL records (for statistics/analysis page)
+        Same as load_characters now, kept for backward compatibility
+        """
         return self._load_characters_internal(only_today=False)
 
     def _load_characters_internal(self, only_today: bool) -> tuple[List[ActivityCharacter], SuggestionUserSettings | None]:

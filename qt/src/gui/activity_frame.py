@@ -298,11 +298,18 @@ class ActivityFrame(QWidget):
         if not self.current_character:
             return
 
-        total_value, total_duration, _ = self.current_character.calculate_totals(activity_type)
+        # When only_today=True is used for loading, records only contains today's data
+        # But we have cumulative current_progress already saved in each goal from JSON
+        # So use the saved cumulative progress instead of recalculating from incomplete records
         goals = (
             self.current_character.grinding_goals if activity_type == ActivityType.GRINDING
             else self.current_character.star_waiting_goals
         )
+
+        # Calculate total duration across all goals (duration isn't saved per goal in persistence)
+        # But total_value should be taken from each goal's saved current_progress
+        total_value = sum(g.current_progress for g in goals)
+        _, total_duration, _ = self.current_character.calculate_totals(activity_type)
 
         if not goals:
             label = QLabel("暂无目标\n点击下方按钮添加目标")
@@ -310,20 +317,11 @@ class ActivityFrame(QWidget):
             scroll_layout.addWidget(label)
         else:
             for i, goal in enumerate(goals):
-                # For each goal, use current_progress stored in the goal itself for named fish targets
-                # This ensures each fish target tracks its own progress correctly
-                if activity_type == ActivityType.GRINDING:
-                    goal_total_value = total_value
-                    goal_total_duration = total_duration
-                elif goal.fish_name is not None:
-                    # For named fish target: current progress is stored in the goal itself
-                    goal_total_value = goal.current_progress
-                    # Duration is still total across all sessions
-                    goal_total_duration = total_duration
-                else:
-                    # Unnamed star goal: same as before
-                    goal_total_value = total_value
-                    goal_total_duration = total_duration
+                # Always use current_progress stored in the goal itself
+                # This ensures cumulative progress is correct even when only today's records are loaded
+                goal_total_value = goal.current_progress
+                # Duration is still total across all sessions (sum from all loaded records)
+                goal_total_duration = total_duration
 
                 title = f"目标 #{i+1}"
                 if goal.fish_name:
