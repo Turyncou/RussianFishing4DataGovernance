@@ -14,10 +14,12 @@ from src.core.models import (
 
 
 class DataPersistence:
-    """Base class for data persistence"""
+    """Base class for data persistence with memory caching to avoid repeated IO"""
 
     def __init__(self, file_path: str):
         self.file_path = file_path
+        self._cached_data: dict | None = None
+        self._last_modified: float = 0
 
     def save(self, data: Any) -> None:
         """Save data to JSON file"""
@@ -28,15 +30,38 @@ class DataPersistence:
         with open(self.file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
+        # Update cache after saving
+        if isinstance(data, dict):
+            self._cached_data = data
+        else:
+            self._cached_data = None
+        if os.path.exists(self.file_path):
+            self._last_modified = os.path.getmtime(self.file_path)
+
     def load(self) -> dict:
-        """Load data from JSON file, returns empty dict if file doesn't exist"""
+        """Load data from JSON file, returns empty dict if file doesn't exist
+        Uses in-memory cache to avoid repeated disk reads when file hasn't changed
+        """
+        # Check if we have cached data and file hasn't been modified
+        if self._cached_data is not None and os.path.exists(self.file_path):
+            mtime = os.path.getmtime(self.file_path)
+            if abs(mtime - self._last_modified) < 0.1:  # Within 100ms, consider unchanged
+                return self._cached_data.copy()
+
         if not os.path.exists(self.file_path):
+            self._cached_data = {}
+            self._last_modified = 0
             return {}
 
         try:
             with open(self.file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                self._cached_data = data
+                self._last_modified = os.path.getmtime(self.file_path)
+                return data
         except (json.JSONDecodeError, FileNotFoundError):
+            self._cached_data = {}
+            self._last_modified = 0
             return {}
 
 
@@ -586,7 +611,8 @@ class AppSettingsPersistence(DataPersistence):
     def save_settings(self, background_image_path: str = None, background_opacity: float = 0.15, theme: str = "dark", show_income_info: bool = False,
                      screen_recorder_start_hotkey: str = None, screen_recorder_stop_hotkey: str = None, screen_recorder_save_path: str = None,
                      screen_recorder_record_mic: bool = False, screen_recorder_record_system: bool = False,
-                     special_cursor_on_hover: bool = True) -> None:
+                     special_cursor_on_hover: bool = True,
+                     enable_performance_log: bool = True) -> None:
         """Save application settings"""
         data = {
             'background_image_path': background_image_path if background_image_path else None,
@@ -599,6 +625,7 @@ class AppSettingsPersistence(DataPersistence):
             'screen_recorder_record_mic': screen_recorder_record_mic,
             'screen_recorder_record_system': screen_recorder_record_system,
             'special_cursor_on_hover': special_cursor_on_hover,
+            'enable_performance_log': enable_performance_log,
         }
         self.save(data)
 
@@ -616,6 +643,8 @@ class AppSettingsPersistence(DataPersistence):
                 'screen_recorder_save_path': None,
                 'screen_recorder_record_mic': False,
                 'screen_recorder_record_system': False,
+                'special_cursor_on_hover': True,
+                'enable_performance_log': True,
             }
 
         try:
@@ -630,6 +659,7 @@ class AppSettingsPersistence(DataPersistence):
                 'screen_recorder_record_mic': data.get('screen_recorder_record_mic', False),
                 'screen_recorder_record_system': data.get('screen_recorder_record_system', False),
                 'special_cursor_on_hover': data.get('special_cursor_on_hover', True),
+                'enable_performance_log': data.get('enable_performance_log', True),
             }
         except (KeyError, ValueError):
             return {
@@ -643,6 +673,7 @@ class AppSettingsPersistence(DataPersistence):
                 'screen_recorder_record_mic': False,
                 'screen_recorder_record_system': False,
                 'special_cursor_on_hover': True,
+                'enable_performance_log': True,
             }
 
 

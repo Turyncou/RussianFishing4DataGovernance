@@ -177,6 +177,9 @@ class MainWindow(QMainWindow):
         # Special cursor on hover setting
         self._special_cursor_on_hover = True
 
+        # Performance monitoring logging setting
+        self._enable_performance_log = True
+
         # Home page navigation buttons (for theme updates)
         self._home_buttons = []
 
@@ -784,6 +787,7 @@ class MainWindow(QMainWindow):
             self._screen_recorder_record_mic = settings.get('screen_recorder_record_mic', False)
             self._screen_recorder_record_system = settings.get('screen_recorder_record_system', False)
             self._special_cursor_on_hover = settings.get('special_cursor_on_hover', True)
+            self._enable_performance_log = settings.get('enable_performance_log', True)
 
             # Initialize daily tasks persistence
             self.daily_task_persistence = DailyTaskPersistence(os.path.join(self.data_dir, 'daily_tasks.json'))
@@ -1383,7 +1387,8 @@ class MainWindow(QMainWindow):
             self._screen_recorder_save_path,
             self._screen_recorder_record_mic,
             self._screen_recorder_record_system,
-            self._special_cursor_on_hover
+            self._special_cursor_on_hover,
+            getattr(self, '_enable_performance_log', True)
         )
         dialog.settings_changed.connect(self._on_app_settings_changed)
         dialog.exec()
@@ -1391,8 +1396,11 @@ class MainWindow(QMainWindow):
     def _on_app_settings_changed(self, image_path: str, opacity: float, theme: str, show_income: bool,
                                   start_hotkey: str = None, stop_hotkey: str = None, save_path: str = None,
                                   record_mic: bool = None, record_system: bool = None,
-                                  special_cursor_on_hover: bool = None):
+                                  special_cursor_on_hover: bool = None,
+                                  enable_performance_log: bool = None):
         """Callback when application settings are changed"""
+        from src.utils.performance_monitor import PerformanceMonitor
+
         self._background_image_path = image_path
         self._background_opacity = opacity
         self._current_theme = theme
@@ -1408,6 +1416,16 @@ class MainWindow(QMainWindow):
             self._screen_recorder_record_system = record_system
         if special_cursor_on_hover is not None:
             self._special_cursor_on_hover = special_cursor_on_hover
+        if enable_performance_log is not None:
+            self._enable_performance_log = enable_performance_log
+            # Start/stop monitor based on new setting
+            monitor = PerformanceMonitor.instance()
+            if monitor:
+                if enable_performance_log:
+                    if not monitor._running:
+                        monitor.start()
+                else:
+                    monitor.stop()
 
         # Update theme if it changed
         self._apply_current_theme()
@@ -1435,25 +1453,62 @@ class MainWindow(QMainWindow):
                 screen_recorder_save_path=self._screen_recorder_save_path,
                 screen_recorder_record_mic=self._screen_recorder_record_mic,
                 screen_recorder_record_system=self._screen_recorder_record_system,
-                special_cursor_on_hover=self._special_cursor_on_hover
+                special_cursor_on_hover=self._special_cursor_on_hover,
+                enable_performance_log=self._enable_performance_log
             )
 
         # Update background display
         self._update_background()
 
+    # Inner class for custom background rendering - defined once only
+    class _BackgroundLabel(QLabel):
+        """Keeps original pixmap in memory and auto-scales on paint for smooth resizing"""
+        def __init__(self, original_pixmap, opacity, parent=None):
+            super().__init__(parent)
+            self._original_pixmap = original_pixmap
+            self._opacity = opacity
+
+        def paintEvent(self, event):
+            from PySide6.QtGui import QPainter
+            # Auto-scale to current label size during paint
+            painter = QPainter(self)
+            painter.setOpacity(self._opacity)
+            scaled = self._original_pixmap.scaled(
+                self.size(),
+                Qt.KeepAspectRatioByExpanding,
+                Qt.SmoothTransformation
+            )
+            # Center the scaled image
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawPixmap(x, y, scaled)
+            painter.end()
+
     def _update_background(self):
         """Update the background image display"""
-        # Remove old background label if exists
-        if self._background_label is not None:
+        # Store original pixmap as instance variable for reuse
+        if not hasattr(self, '_background_original_pixmap'):
+            self._background_original_pixmap = None
+        if not hasattr(self, '_last_background_path'):
+            self._last_background_path = None
+
+        # Only recreate background label if image path actually changed
+        if self._background_label is not None and (
+            self._background_original_pixmap is None or
+            self._background_image_path != self._last_background_path
+        ):
             self.central_widget.layout().removeWidget(self._background_label)
             self._background_label.deleteLater()
             self._background_label = None
+            self._background_original_pixmap = None
+            self._last_background_path = None
 
         if not self._background_image_path or not os.path.exists(self._background_image_path):
             # No background image - create an opaque-in-hit-test layer covering everything
             # This must block click-through on Windows, which requires any alpha > 0
             from PySide6.QtGui import QPalette, QColor
-            self._background_label = QLabel(self.central_widget)
+            if self._background_label is None:
+                self._background_label = QLabel(self.central_widget)
             self._background_label.resize(self.central_widget.size())
             # Use QPalette to set background - more reliable than stylesheet
             palette = self._background_label.palette()
@@ -1469,34 +1524,24 @@ class MainWindow(QMainWindow):
             self._background_label.show()
             return
 
-        # Custom background label that keeps the original pixmap and auto-scales on paint
-        from PySide6.QtGui import QPainter, QColor, QPixmap
-        class BackgroundLabel(QLabel):
-            def __init__(self, original_pixmap, opacity, parent=None):
-                super().__init__(parent)
-                self._original_pixmap = original_pixmap
-                self._opacity = opacity
+        # Load original pixmap if not loaded or changed
+        from PySide6.QtGui import QPixmap
+        if self._background_original_pixmap is None or self._background_image_path != self._last_background_path:
+            self._background_original_pixmap = QPixmap(self._background_image_path)
+            self._last_background_path = self._background_image_path
 
-            def paintEvent(self, event):
-                # Auto-scale to current label size during paint
-                painter = QPainter(self)
-                painter.setOpacity(self._opacity)
-                scaled = self._original_pixmap.scaled(
-                    self.size(),
-                    Qt.KeepAspectRatioByExpanding,
-                    Qt.SmoothTransformation
+        if self._background_original_pixmap and not self._background_original_pixmap.isNull():
+            # Create if doesn't exist yet
+            if self._background_label is None:
+                self._background_label = self._BackgroundLabel(
+                    self._background_original_pixmap,
+                    self._background_opacity,
+                    self.central_widget
                 )
-                # Center the scaled image
-                x = (self.width() - scaled.width()) // 2
-                y = (self.height() - scaled.height()) // 2
-                painter.drawPixmap(x, y, scaled)
-                painter.end()
-
-        # Load original pixmap once - keep it in memory
-        original_pixmap = QPixmap(self._background_image_path)
-        if not original_pixmap.isNull():
-            # Create custom background label
-            self._background_label = BackgroundLabel(original_pixmap, self._background_opacity, self.central_widget)
+            # Update opacity if it changed
+            if hasattr(self._background_label, '_opacity'):
+                self._background_label._opacity = self._background_opacity
+            # Just resize to current window size - painting will handle scaling
             self._background_label.resize(self.central_widget.size())
             self._background_label.setAutoFillBackground(False)
             # Absolutely critical: do NOT allow mouse to pass through this widget
@@ -1620,6 +1665,21 @@ class MainWindow(QMainWindow):
                 new_width = new_right - new_x
                 new_height = new_bottom - new_y
 
+                # Fix: when dragging top to resize, new_bottom should be the current bottom
+                # If we're only dragging top, keep bottom at current position, not starting position
+                if 'top' in self._resize_direction and not 'bottom' in self._resize_direction:
+                    current_geo = self.geometry()
+                    new_bottom = current_geo.y() + current_geo.height()
+
+                # Fix: same for left - when dragging left only, keep right at current position
+                if 'left' in self._resize_direction and not 'right' in self._resize_direction:
+                    current_geo = self.geometry()
+                    new_right = current_geo.x() + current_geo.width()
+
+                # Recalculate after fixes
+                new_width = new_right - new_x
+                new_height = new_bottom - new_y
+
                 # Apply minimum size constraints
                 if new_width < self.minimumWidth():
                     # If we're dragging left edge, fix it to maintain minimum width
@@ -1636,7 +1696,6 @@ class MainWindow(QMainWindow):
                         new_bottom = new_y + self.minimumHeight()
                     new_height = self.minimumHeight()
 
-                print(f"[resize] direction={self._resize_direction}, mouse=({mouse_global.x()},{mouse_global.y()}), result=({new_width}x{new_height})")
                 self.setGeometry(new_x, new_y, new_width, new_height)
                 event.accept()
                 return
@@ -1700,6 +1759,30 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             super().mouseDoubleClickEvent(event)
+
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts"""
+        from PySide6.QtCore import Qt
+        from src.utils.performance_monitor import PerformanceMonitor
+
+        # Ctrl+P: Print current performance stats
+        if event.key() == Qt.Key_P and event.modifiers() & Qt.ControlModifier:
+            monitor = PerformanceMonitor.instance()
+            if monitor:
+                monitor.log_current()
+            else:
+                # If monitor not started, still log manually
+                import psutil
+                import os
+                process = psutil.Process(os.getpid())
+                mem_mb = process.memory_info().rss / (1024 * 1024)
+                cpu_pct = process.cpu_percent(interval=0.1)
+                threads = process.num_threads()
+                print(f"[Performance] Memory: {mem_mb:.1f} MB | CPU: {cpu_pct:.1f}% | Threads: {threads}")
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
 
     def start_fish_sync(self):
         """Start syncing fish data from official website"""

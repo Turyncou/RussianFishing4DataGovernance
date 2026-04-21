@@ -12,8 +12,8 @@ from PySide6.QtGui import QFont
 class AppSettingsDialog(QDialog):
     """Application settings dialog for all app settings"""
 
-    settings_changed = Signal(str, float, str, bool, str, str, str, bool, bool, bool)
-    # (background_image_path, background_opacity, theme, show_income_info, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor_on_hover)
+    settings_changed = Signal(str, float, str, bool, str, str, str, bool, bool, bool, bool)
+    # (background_image_path, background_opacity, theme, show_income_info, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor_on_hover, enable_performance_log)
 
     def __init__(self, parent=None,
                  current_path: str = None,
@@ -26,11 +26,12 @@ class AppSettingsDialog(QDialog):
                  current_record_mic: bool = False,
                  current_record_system: bool = False,
                  current_special_cursor: bool = True,
+                 current_performance_log: bool = True,
                  current_mic_device: str = None,
                  current_system_device: str = None):
         super().__init__(parent)
         self.setWindowTitle("应用设置")
-        self.resize(600, 680)
+        self.resize(600, 720)
         self.setModal(True)
 
         self.selected_image_path = current_path
@@ -38,6 +39,7 @@ class AppSettingsDialog(QDialog):
         self.current_record_mic = current_record_mic
         self.current_record_system = current_record_system
         self.current_special_cursor = current_special_cursor
+        self.current_performance_log = current_performance_log
         self.current_mic_device = current_mic_device
         self.current_system_device = current_system_device
         self.backgrounds_dir = None
@@ -204,10 +206,17 @@ class AppSettingsDialog(QDialog):
         # Populate devices after UI is created
         self._populate_audio_devices()
 
+        # Performance logging setting
+        perf_layout = QHBoxLayout()
+        perf_layout.addWidget(QLabel("性能监控:"))
+        self.perf_log_checkbox = QCheckBox("启用性能日志输出 (内存/CPU)")
+        self.perf_log_checkbox.setChecked(current_performance_log)
+        perf_layout.addWidget(self.perf_log_checkbox)
+        perf_layout.addStretch()
+        layout.addLayout(perf_layout)
+
         # Hotkey hint
         hotkey_hint = QLabel("快捷键格式说明: ctrl+shift+r, alt+s 等 (需要 keyboard 库支持)\n音频录制需要额外安装: pip install pyaudio sounddevice")
-        hotkey_hint.setStyleSheet("color: #888888; font-size: 11px;")
-        layout.addWidget(hotkey_hint)
         hotkey_hint.setStyleSheet("color: #888888; font-size: 11px;")
         layout.addWidget(hotkey_hint)
 
@@ -310,6 +319,7 @@ class AppSettingsDialog(QDialog):
         record_mic = self.record_mic_checkbox.isChecked()
         record_system = self.record_system_checkbox.isChecked()
         special_cursor = self.special_cursor_checkbox.isChecked()
+        enable_performance_log = self.perf_log_checkbox.isChecked()
 
         # Get selected device names
         mic_device = self.mic_device_combo.currentText()
@@ -326,13 +336,13 @@ class AppSettingsDialog(QDialog):
 
         if self.clear_checkbox.isChecked():
             # No background
-            self.settings_changed.emit(None, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor)
+            self.settings_changed.emit(None, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor, enable_performance_log)
             self.accept()
             return
 
         if not self.selected_image_path:
             # Nothing selected
-            self.settings_changed.emit(None, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor)
+            self.settings_changed.emit(None, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor, enable_performance_log)
             self.accept()
             return
 
@@ -357,5 +367,5 @@ class AppSettingsDialog(QDialog):
                 # If copy fails, just keep original path
                 pass
 
-        self.settings_changed.emit(self.selected_image_path, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor)
+        self.settings_changed.emit(self.selected_image_path, opacity, theme, show_income, start_hotkey, stop_hotkey, save_path, record_mic, record_system, special_cursor, enable_performance_log)
         self.accept()
