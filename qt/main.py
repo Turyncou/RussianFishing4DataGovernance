@@ -31,6 +31,11 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
+    # Set application icon FIRST - important for Windows taskbar to cache correctly
+    script_dir = os.path.abspath(os.path.dirname(__file__))
+    icon_path = os.path.join(script_dir, "芋泥.ico")
+    app.setWindowIcon(QIcon(icon_path))
+
     # Get app data directory
     app_dir = os.path.join(os.path.expanduser('~'), '.rf4_data_process')
     os.makedirs(app_dir, exist_ok=True)
@@ -48,12 +53,6 @@ def main():
         perf_monitor.start()
         if perf_monitor:
             perf_monitor.log_current()
-
-    # Set application icon
-    script_dir = os.path.abspath(os.path.dirname(__file__))
-    icon_path = os.path.join(script_dir, "芋泥.ico")
-    if os.path.exists(icon_path):
-        app.setWindowIcon(QIcon(icon_path))
 
     # Create main window
     main_window = MainWindow(app_dir)

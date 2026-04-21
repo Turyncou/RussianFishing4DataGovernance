@@ -132,8 +132,8 @@ class MainWindow(QMainWindow):
         # For dragging the frameless window
         self._drag_position = None
 
-        # For window resizing from edges
-        self._resize_margin = 8  # pixels from edge to detect resize
+        # For window resizing from edges - 12px makes it easier to hit the edge
+        self._resize_margin = 12  # pixels from edge to detect resize
         self._resize_direction = None  # None, 'left', 'right', 'top', 'bottom', 'top-left', 'top-right', 'bottom-left', 'bottom-right'
         self._resize_start_pos = None
         self._resize_start_geometry = None
@@ -187,6 +187,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("RF4 Data Process")
         self.resize(1200, 800)
         self.setMinimumSize(1000, 700)
+
+        # Set window icon for both app and window - helps Windows taskbar display correctly
+        script_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+        icon_path = os.path.join(script_dir, "..", "芋泥.ico")
+        if os.path.exists(icon_path):
+            from PySide6.QtGui import QIcon
+            self.setWindowIcon(QIcon(icon_path))
 
         # Set default dark theme (will be overridden after loading settings)
         self._apply_dark_theme()
@@ -1420,11 +1427,16 @@ class MainWindow(QMainWindow):
             self._enable_performance_log = enable_performance_log
             # Start/stop monitor based on new setting
             monitor = PerformanceMonitor.instance()
-            if monitor:
-                if enable_performance_log:
-                    if not monitor._running:
-                        monitor.start()
-                else:
+            if enable_performance_log:
+                if monitor is None:
+                    # Create and start new monitor if it doesn't exist yet
+                    from src.utils.performance_monitor import PerformanceMonitor
+                    monitor = PerformanceMonitor(interval_seconds=10.0)
+                    monitor.start()
+                elif not monitor._running:
+                    monitor.start()
+            else:
+                if monitor:
                     monitor.stop()
 
         # Update theme if it changed
@@ -1633,6 +1645,18 @@ class MainWindow(QMainWindow):
         """Handle mouse move for dragging the frameless window or resizing"""
         from PySide6.QtGui import QCursor
 
+        # Always keep correct cursor shape during active resizing
+        if self._resize_direction is not None:
+            # Set cursor shape based on current resize direction
+            if self._resize_direction in ['left', 'right']:
+                self.setCursor(Qt.SizeHorCursor)
+            elif self._resize_direction in ['top', 'bottom']:
+                self.setCursor(Qt.SizeVerCursor)
+            elif self._resize_direction in ['top-left', 'bottom-right']:
+                self.setCursor(Qt.SizeFDiagCursor)
+            elif self._resize_direction in ['top-right', 'bottom-left']:
+                self.setCursor(Qt.SizeBDiagCursor)
+
         if event.buttons() == Qt.LeftButton:
             if self._resize_direction is not None:
                 # Get current mouse position in global screen coordinates
@@ -1708,7 +1732,28 @@ class MainWindow(QMainWindow):
             # Update cursor shape when hovering over edges
             direction = self._get_resize_direction(event.position().toPoint())
             if direction is None:
-                self.setCursor(Qt.ArrowCursor)
+                # Not on resize edge - use custom cursor if enabled
+                if self._special_cursor_on_hover:
+                    from PySide6.QtGui import QCursor, QPixmap
+                    import os
+                    script_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+                    cur_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.cur')
+                    png_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.png')
+                    custom_cursor = None
+                    if os.path.exists(cur_path):
+                        pixmap = QPixmap(cur_path)
+                        if not pixmap.isNull():
+                            custom_cursor = QCursor(pixmap, 0, 0)
+                    elif os.path.exists(png_path):
+                        pixmap = QPixmap(png_path)
+                        if not pixmap.isNull():
+                            custom_cursor = QCursor(pixmap, 0, 0)
+                    if custom_cursor and not custom_cursor.pixmap().isNull():
+                        self.setCursor(custom_cursor)
+                    else:
+                        self.setCursor(Qt.PointingHandCursor)
+                else:
+                    self.setCursor(Qt.ArrowCursor)
             elif direction in ['left', 'right']:
                 self.setCursor(Qt.SizeHorCursor)
             elif direction in ['top', 'bottom']:
@@ -1868,36 +1913,9 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def enterEvent(self, event):
-        """Mouse enters window - change to hand cursor if enabled"""
-        if self._special_cursor_on_hover:
-            from PySide6.QtGui import QCursor, QPixmap, QBitmap
-            import os
-            # Check for custom cursor files in assets directory
-            script_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-            # Try .cur file first (Windows cursor format)
-            cur_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.cur')
-            png_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.png')
-
-            custom_cursor = None
-            if os.path.exists(cur_path):
-                # Load cursor from .cur file
-                pixmap = QPixmap(cur_path)
-                if not pixmap.isNull():
-                    # Use top-left as hotspot
-                    custom_cursor = QCursor(pixmap, 0, 0)
-            elif os.path.exists(png_path):
-                # Load cursor from .png file
-                pixmap = QPixmap(png_path)
-                if not pixmap.isNull():
-                    # Assume hotspot at top-left (0,0)
-                    # If you need different hotspot, you can modify this code
-                    custom_cursor = QCursor(pixmap, 0, 0)
-
-            if custom_cursor and not custom_cursor.pixmap().isNull():
-                self.setCursor(custom_cursor)
-            else:
-                # Fallback to default pointing hand cursor
-                self.setCursor(Qt.PointingHandCursor)
+        """Mouse enters window - change to hand cursor if enabled
+        Note: Cursor is updated by mouseMoveEvent when hovering over edges
+        """
         super().enterEvent(event)
 
     def leaveEvent(self, event):
@@ -1905,33 +1923,254 @@ class MainWindow(QMainWindow):
         self.setCursor(Qt.ArrowCursor)
         super().leaveEvent(event)
 
-    def event(self, event):
-        """Override main window event to handle resize detection before it goes to child widgets
-        This guarantees edge resize always works regardless of content layout
+    def __init__(self, data_dir: str):
+        super().__init__()
+        # Enable true transparency for the entire window
+        # This allows seeing through the window to what's behind when custom background is set
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # Remove window frame border for completely frameless window
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        # Base background
+        self.setStyleSheet("QMainWindow { background-color: rgba(0, 0, 0, 0); }");
+        self.data_dir = data_dir
+        self._frame_cache = {}
+        self.current_widget = None
+
+        # For dragging the frameless window
+        self._drag_position = None
+
+        # For window resizing from edges - 12px makes it easier to hit the edge
+        self._resize_margin = 12  # pixels from edge to detect resize
+        self._resize_direction = None  # None, 'left', 'right', 'top', 'bottom', 'top-left', 'top-right', 'bottom-left', 'bottom-right'
+        self._resize_start_pos = None
+        self._resize_start_geometry = None
+
+        # Track double-click for maximize toggle
+        self._last_click_time = 0
+        self._double_click_interval = 300  # milliseconds
+
+        # Persistence instances (will be initialized in background)
+        self.lottery_persistence = None
+        self.activity_persistence = None
+        self.storage_persistence = None
+        self.bait_persistence = None
+        self.friend_link_persistence = None
+        self.credentials_persistence = None
+        self.app_settings_persistence = None
+        self.backup_dir = None
+
+        # Background image settings
+        self._background_image_path = None
+        self._background_opacity = 0.15
+        self._background_label = None
+
+        # Theme settings
+        self._current_theme = "dark"
+
+        # Income display settings
+        self._show_income_info = False
+
+        # Daily tasks persistence
+        self.daily_task_persistence = None
+
+        # Screen recorder settings
+        self._screen_recorder = None
+        self._screen_recorder_start_hotkey = "ctrl+shift+r"
+        self._screen_recorder_stop_hotkey = "ctrl+shift+s"
+        self._screen_recorder_save_path = None
+        self._screen_recorder_record_mic = False
+        self._screen_recorder_record_system = False
+
+        # Special cursor on hover setting
+        self._special_cursor_on_hover = True
+
+        # Performance monitoring logging setting
+        self._enable_performance_log = True
+
+        # Home page navigation buttons (for theme updates)
+        self._home_buttons = []
+
+        # Enable mouse tracking
+        self.setMouseTracking(True)
+
+        # Timer to constantly check cursor position for edge detection
+        # This is the most reliable method - works regardless of child widget event handling
+        from PySide6.QtCore import QTimer
+        self._cursor_check_timer = QTimer(self)
+        self._cursor_check_timer.setInterval(30)  # ~33 checks per second - smooth enough
+        self._cursor_check_timer.timeout.connect(self._check_cursor_position)
+        self._cursor_check_timer.start()
+
+        # Install event filter to catch all mouse events from children
+        self.installEventFilter(self)
+
+        # Window setup
+        self.setWindowTitle("RF4 Data Process")
+        self.resize(1200, 800)
+        self.setMinimumSize(1000, 700)
+
+        # Set window icon for both app and window - helps Windows taskbar display correctly
+        script_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+        icon_path = os.path.join(script_dir, "..", "芋泥.ico")
+        if os.path.exists(icon_path):
+            from PySide6.QtGui import QIcon
+            self.setWindowIcon(QIcon(icon_path))
+
+        # Set default dark theme (will be overridden after loading settings)
+        self._apply_dark_theme()
+
+        # Create loading screen
+        self._create_loading_screen()
+
+        # Start background loading
+        self._start_background_loading()
+
+    def eventFilter(self, obj, event):
+        """Event filter to catch all mouse move events from all child widgets
+        This allows us to update cursor shape on edges even when mouse is over child content
         """
         from PySide6.QtGui import QMouseEvent
         from PySide6.QtCore import Qt
 
-        # Handle mouse events first for resize detection
-        if event.type() in [
-            QMouseEvent.MouseButtonPress,
-            QMouseEvent.MouseMove,
-            QMouseEvent.MouseButtonRelease
-        ]:
-            me = event
-            local_pos = me.position().toPoint()
+        if event.type() == QMouseEvent.MouseMove:
+            # Get mouse position in main window coordinates
+            global_pos = event.globalPosition().toPoint()
+            local_pos = self.mapFromGlobal(global_pos)
+            direction = self._get_resize_direction(local_pos)
+
+            # ALWAYS update cursor based on current position
+            if direction is not None:
+                if direction in ['left', 'right']:
+                    self.setCursor(Qt.SizeHorCursor)
+                elif direction in ['top', 'bottom']:
+                    self.setCursor(Qt.SizeVerCursor)
+                elif direction in ['top-left', 'bottom-right']:
+                    self.setCursor(Qt.SizeFDiagCursor)
+                elif direction in ['top-right', 'bottom-left']:
+                    self.setCursor(Qt.SizeBDiagCursor)
+                # If on edge and actively resizing, handle the movement
+                if self._resize_direction is not None:
+                    new_event = QMouseEvent(
+                        event.type(),
+                        local_pos,
+                        event.button(),
+                        event.buttons(),
+                        event.modifiers()
+                    )
+                    self.mouseMoveEvent(new_event)
+                # On edge - consume the event
+                return True
+            else:
+                # Not on resize edge - restore normal cursor
+                if self._special_cursor_on_hover:
+                    from PySide6.QtGui import QCursor, QPixmap
+                    import os
+                    script_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+                    cur_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.cur')
+                    png_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.png')
+                    custom_cursor = None
+                    if os.path.exists(cur_path):
+                        pixmap = QPixmap(cur_path)
+                        if not pixmap.isNull():
+                            custom_cursor = QCursor(pixmap, 0, 0)
+                    elif os.path.exists(png_path):
+                        pixmap = QPixmap(png_path)
+                        if not pixmap.isNull():
+                            custom_cursor = QCursor(pixmap, 0, 0)
+                    if custom_cursor and not custom_cursor.pixmap().isNull():
+                        self.setCursor(custom_cursor)
+                    else:
+                        self.setCursor(Qt.PointingHandCursor)
+                else:
+                    self.setCursor(Qt.ArrowCursor)
+                # Not on edge - let event go through to child
+                return False
+
+        # Handle press/release for resizing too
+        if event.type() in [QMouseEvent.MouseButtonPress, QMouseEvent.MouseButtonRelease]:
+            global_pos = event.globalPosition().toPoint()
+            local_pos = self.mapFromGlobal(global_pos)
             direction = self._get_resize_direction(local_pos)
 
             if direction is not None or self._resize_direction is not None:
-                # We need to handle this resize
+                new_event = QMouseEvent(
+                    event.type(),
+                    local_pos,
+                    event.button(),
+                    event.buttons(),
+                    event.modifiers()
+                )
                 if event.type() == QMouseEvent.MouseButtonPress:
-                    self.mousePressEvent(me)
-                elif event.type() == QMouseEvent.MouseMove:
-                    self.mouseMoveEvent(me)
+                    self.mousePressEvent(new_event)
                 elif event.type() == QMouseEvent.MouseButtonRelease:
-                    self.mouseReleaseEvent(me)
-                # Event handled - don't pass to children
+                    self.mouseReleaseEvent(new_event)
                 return True
 
-        # Let other events through normally
+        # Let the event go through normally
+        return super().eventFilter(obj, event)
+
+    def _check_cursor_position(self):
+        """Periodically check cursor position and update resize cursor when hovering on edges
+        This method is 100% reliable regardless of child widget mouse tracking settings
+        """
+        from PySide6.QtGui import QCursor
+        from PySide6.QtCore import Qt
+
+        # Get global cursor position and convert to local coordinates
+        global_pos = QCursor.pos()
+        local_pos = self.mapFromGlobal(global_pos)
+
+        # Check if cursor is inside the window
+        if not self.rect().contains(local_pos):
+            return
+
+        # Get direction and update cursor
+        direction = self._get_resize_direction(local_pos)
+
+        if direction is not None:
+            if direction in ['left', 'right']:
+                if self.cursor().shape() != Qt.SizeHorCursor:
+                    self.setCursor(Qt.SizeHorCursor)
+            elif direction in ['top', 'bottom']:
+                if self.cursor().shape() != Qt.SizeVerCursor:
+                    self.setCursor(Qt.SizeVerCursor)
+            elif direction in ['top-left', 'bottom-right']:
+                if self.cursor().shape() != Qt.SizeFDiagCursor:
+                    self.setCursor(Qt.SizeFDiagCursor)
+            elif direction in ['top-right', 'bottom-left']:
+                if self.cursor().shape() != Qt.SizeBDiagCursor:
+                    self.setCursor(Qt.SizeBDiagCursor)
+        else:
+            # Only update if we were using a resize cursor before
+            # This avoids overriding the custom cursor when not on edges
+            current_shape = self.cursor().shape()
+            if current_shape in [
+                Qt.SizeHorCursor, Qt.SizeVerCursor,
+                Qt.SizeFDiagCursor, Qt.SizeBDiagCursor
+            ]:
+                # Restore normal cursor
+                if self._special_cursor_on_hover:
+                    from PySide6.QtGui import QCursor, QPixmap
+                    import os
+                    script_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+                    cur_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.cur')
+                    png_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.png')
+                    custom_cursor = None
+                    if os.path.exists(cur_path):
+                        pixmap = QPixmap(cur_path)
+                        if not pixmap.isNull():
+                            custom_cursor = QCursor(pixmap, 0, 0)
+                    elif os.path.exists(png_path):
+                        pixmap = QPixmap(png_path)
+                        if not pixmap.isNull():
+                            custom_cursor = QCursor(pixmap, 0, 0)
+                    if custom_cursor and not custom_cursor.pixmap().isNull():
+                        self.setCursor(custom_cursor)
+                    else:
+                        self.setCursor(Qt.PointingHandCursor)
+                else:
+                    self.setCursor(Qt.ArrowCursor)
+
+    def event(self, event):
+        """Main event handler"""
         return super().event(event)
