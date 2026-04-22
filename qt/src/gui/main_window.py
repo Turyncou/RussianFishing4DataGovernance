@@ -201,8 +201,15 @@ class MainWindow(QMainWindow):
         # Create loading screen
         self._create_loading_screen()
 
+        # Register keyboard shortcuts
+        self._register_shortcuts()
+
         # Start background loading
         self._start_background_loading()
+
+        # Force full repaint after window is fully initialized (fixes background not filling)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(50, self._force_full_repaint)
 
     def _apply_dark_theme(self):
         """Apply dark theme stylesheet"""
@@ -832,9 +839,11 @@ class MainWindow(QMainWindow):
         # Create main UI
         self._create_main_ui()
         self.show_home_page()
-        # Update background after central widget is created and layout done
-        if self._background_image_path and os.path.exists(self._background_image_path):
-            QTimer.singleShot(50, self._update_background)
+        # Update background IMMEDIATELY after central widget is created
+        # No delay - ensures background is ready before window shows
+        self._update_background()
+        # Second update after layout settles - ensures correct sizing
+        QTimer.singleShot(10, self._update_background)
 
         # Initialize screen recorder
         self._init_screen_recorder()
@@ -847,8 +856,12 @@ class MainWindow(QMainWindow):
             def paintEvent(self, event):
                 from PySide6.QtGui import QPainter, QColor
                 painter = QPainter(self)
+                # Use CompositionMode_Source to ensure ALL pixels are set
+                # This fixes the "background not filling on initial show" issue on Windows
+                painter.setCompositionMode(QPainter.CompositionMode_Source)
                 # Fill with 2% opacity black - completely invisible visually
                 # But guarantees all pixels have alpha > 0, so Windows won't click through
+                # This is the KEY FIX: every pixel gets explicitly set in paintEvent
                 painter.fillRect(self.rect(), QColor(0, 0, 0, 5))
                 super().paintEvent(event)
 
@@ -859,13 +872,6 @@ class MainWindow(QMainWindow):
         self.central_widget.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         self.setCentralWidget(self.central_widget)
 
-        # Add drop shadow effect to the entire window for better visual separation
-        from PySide6.QtWidgets import QGraphicsDropShadowEffect
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(15)
-        shadow.setColor(Qt.black)
-        shadow.setOffset(0, 0)
-        self.central_widget.setGraphicsEffect(shadow)
         main_layout = QVBoxLayout(self.central_widget)
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(8)
@@ -1037,6 +1043,10 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.bottom_bar)
 
+        # Create loading overlay
+        from .loading_overlay import LoadingOverlay
+        self.loading_overlay = LoadingOverlay(self.central_widget)
+
     def show_home_page(self):
         """Show home page with big navigation buttons"""
         self.clear_current_content()
@@ -1076,16 +1086,27 @@ class MainWindow(QMainWindow):
                 background-color: rgba(44, 90, 160, 0.15);
                 color: %s;
                 border: 2px solid rgba(44, 90, 160, 0.6);
-                border-radius: 12px;
-                padding: 8px 12px;
+                border-radius: 16px;
+                font-size: 16px;
+                font-weight: bold;
+                padding: 12px 8px;
             }
             QPushButton:hover {
                 background-color: rgba(44, 90, 160, 0.85);
-                border-color: rgba(44, 90, 160, 1);
+                border-color: rgba(100, 150, 255, 1);
+                border-width: 2px;
                 color: #ffffff;
             }
             QPushButton:pressed {
                 background-color: rgba(21, 47, 79, 0.95);
+                border-color: rgba(80, 130, 230, 1);
+                padding-top: 14px;
+                padding-bottom: 10px;
+            }
+            QPushButton:disabled {
+                background-color: rgba(60, 60, 60, 0.5);
+                border-color: rgba(80, 80, 80, 0.5);
+                color: #888888;
             }
         """
 
@@ -1097,12 +1118,19 @@ class MainWindow(QMainWindow):
         # Clear old button references
         self._home_buttons.clear()
 
+        # Button click handler with animation
+        def on_button_clicked(btn, callback):
+            """Handle button click with pulse animation"""
+            from .animation_utils import ButtonPulseAnimator
+            ButtonPulseAnimator.pulse(btn)
+            callback()
+
         # Row 0
         activity_btn = QPushButton("📊\n活动统计")
         activity_btn.setFont(button_font)
         activity_btn.setMinimumSize(button_size)
         activity_btn.setStyleSheet(button_style)
-        activity_btn.clicked.connect(self.show_activity_stats)
+        activity_btn.clicked.connect(lambda checked, b=activity_btn, c=self.show_activity_stats: on_button_clicked(b, c))
         grid.addWidget(activity_btn, 0, 0)
         self._home_buttons.append(activity_btn)
 
@@ -1110,7 +1138,7 @@ class MainWindow(QMainWindow):
         storage_btn.setFont(button_font)
         storage_btn.setMinimumSize(button_size)
         storage_btn.setStyleSheet(button_style)
-        storage_btn.clicked.connect(self.show_storage)
+        storage_btn.clicked.connect(lambda checked, b=storage_btn, c=self.show_storage: on_button_clicked(b, c))
         grid.addWidget(storage_btn, 0, 1)
         self._home_buttons.append(storage_btn)
 
@@ -1119,7 +1147,7 @@ class MainWindow(QMainWindow):
         bait_btn.setFont(button_font)
         bait_btn.setMinimumSize(button_size)
         bait_btn.setStyleSheet(button_style)
-        bait_btn.clicked.connect(self.show_bait)
+        bait_btn.clicked.connect(lambda checked, b=bait_btn, c=self.show_bait: on_button_clicked(b, c))
         grid.addWidget(bait_btn, 1, 0)
         self._home_buttons.append(bait_btn)
 
@@ -1127,7 +1155,7 @@ class MainWindow(QMainWindow):
         lottery_btn.setFont(button_font)
         lottery_btn.setMinimumSize(button_size)
         lottery_btn.setStyleSheet(button_style)
-        lottery_btn.clicked.connect(self.show_lottery)
+        lottery_btn.clicked.connect(lambda checked, b=lottery_btn, c=self.show_lottery: on_button_clicked(b, c))
         grid.addWidget(lottery_btn, 1, 1)
         self._home_buttons.append(lottery_btn)
 
@@ -1136,7 +1164,7 @@ class MainWindow(QMainWindow):
         credentials_btn.setFont(button_font)
         credentials_btn.setMinimumSize(button_size)
         credentials_btn.setStyleSheet(button_style)
-        credentials_btn.clicked.connect(self.show_credentials)
+        credentials_btn.clicked.connect(lambda checked, b=credentials_btn, c=self.show_credentials: on_button_clicked(b, c))
         grid.addWidget(credentials_btn, 2, 0)
         self._home_buttons.append(credentials_btn)
 
@@ -1144,7 +1172,7 @@ class MainWindow(QMainWindow):
         statistics_btn.setFont(button_font)
         statistics_btn.setMinimumSize(button_size)
         statistics_btn.setStyleSheet(button_style)
-        statistics_btn.clicked.connect(self.show_statistics)
+        statistics_btn.clicked.connect(lambda checked, b=statistics_btn, c=self.show_statistics: on_button_clicked(b, c))
         grid.addWidget(statistics_btn, 2, 1)
         self._home_buttons.append(statistics_btn)
 
@@ -1153,7 +1181,7 @@ class MainWindow(QMainWindow):
         task_btn.setFont(button_font)
         task_btn.setMinimumSize(button_size)
         task_btn.setStyleSheet(button_style)
-        task_btn.clicked.connect(self.show_daily_tasks)
+        task_btn.clicked.connect(lambda checked, b=task_btn, c=self.show_daily_tasks: on_button_clicked(b, c))
         grid.addWidget(task_btn, 3, 0)
         self._home_buttons.append(task_btn)
 
@@ -1162,7 +1190,7 @@ class MainWindow(QMainWindow):
         multi_btn.setFont(button_font)
         multi_btn.setMinimumSize(button_size)
         multi_btn.setStyleSheet(button_style)
-        multi_btn.clicked.connect(self.show_multi_launcher)
+        multi_btn.clicked.connect(lambda checked, b=multi_btn, c=self.show_multi_launcher: on_button_clicked(b, c))
         grid.addWidget(multi_btn, 3, 1)
         self._home_buttons.append(multi_btn)
 
@@ -1175,6 +1203,27 @@ class MainWindow(QMainWindow):
 
         self.content_layout.addWidget(home_widget)
         self.current_widget = home_widget
+
+    def _animate_switch_to(self, new_widget):
+        """Animate transition to a new widget with fade and slide effect
+
+        Args:
+            new_widget: The new widget to show
+        """
+        from .animation_utils import FadeSlideAnimator
+
+        if self.current_widget is not None:
+            # Hide old widget immediately
+            self.content_layout.removeWidget(self.current_widget)
+            self.current_widget.hide()
+
+        # Add and show new widget
+        self.content_layout.addWidget(new_widget)
+        new_widget.show()
+        self.current_widget = new_widget
+
+        # Animate in
+        FadeSlideAnimator.animate_in(new_widget)
 
     def clear_current_content(self):
         """Clear current content from content layout"""
@@ -1207,9 +1256,7 @@ class MainWindow(QMainWindow):
             frame = ActivityFrame(self.activity_persistence, self._show_income_info)
             self._frame_cache[cache_key] = frame
 
-        self.content_layout.addWidget(frame)
-        frame.show()
-        self.current_widget = frame
+        self._animate_switch_to(frame)
 
     def show_storage(self):
         """Show storage duration page"""
@@ -1225,9 +1272,7 @@ class MainWindow(QMainWindow):
             frame = StorageFrame(self.storage_persistence)
             self._frame_cache[cache_key] = frame
 
-        self.content_layout.addWidget(frame)
-        frame.show()
-        self.current_widget = frame
+        self._animate_switch_to(frame)
 
     def show_lottery(self):
         """Show lottery wheel page"""
@@ -1243,9 +1288,7 @@ class MainWindow(QMainWindow):
             frame = LotteryFrame(self.lottery_persistence)
             self._frame_cache[cache_key] = frame
 
-        self.content_layout.addWidget(frame)
-        frame.show()
-        self.current_widget = frame
+        self._animate_switch_to(frame)
 
     def show_credentials(self):
         """Show account credentials manager page"""
@@ -1261,9 +1304,7 @@ class MainWindow(QMainWindow):
             frame = CredentialsFrame(self.credentials_persistence)
             self._frame_cache[cache_key] = frame
 
-        self.content_layout.addWidget(frame)
-        frame.show()
-        self.current_widget = frame
+        self._animate_switch_to(frame)
 
     def show_bait(self):
         """Show bait/tackle consumption tracking page"""
@@ -1279,9 +1320,7 @@ class MainWindow(QMainWindow):
             frame = BaitFrame(self.bait_persistence)
             self._frame_cache[cache_key] = frame
 
-        self.content_layout.addWidget(frame)
-        frame.show()
-        self.current_widget = frame
+        self._animate_switch_to(frame)
 
     def show_statistics(self):
         """Show data analysis page with visualizations"""
@@ -1297,9 +1336,7 @@ class MainWindow(QMainWindow):
             frame = StatisticsFrame(self.activity_persistence)
             self._frame_cache[cache_key] = frame
 
-        self.content_layout.addWidget(frame)
-        frame.show()
-        self.current_widget = frame
+        self._animate_switch_to(frame)
 
     def show_daily_tasks(self):
         """Show daily task tracking page"""
@@ -1319,9 +1356,7 @@ class MainWindow(QMainWindow):
             frame = DailyTaskFrame(self.daily_task_persistence, characters)
             self._frame_cache[cache_key] = frame
 
-        self.content_layout.addWidget(frame)
-        frame.show()
-        self.current_widget = frame
+        self._animate_switch_to(frame)
 
     def show_multi_launcher(self):
         """Open multiple instances launcher dialog"""
@@ -1481,9 +1516,15 @@ class MainWindow(QMainWindow):
             self._opacity = opacity
 
         def paintEvent(self, event):
-            from PySide6.QtGui import QPainter
+            from PySide6.QtGui import QPainter, QColor
             # Auto-scale to current label size during paint
             painter = QPainter(self)
+            # Use CompositionMode_Source to ensure all pixels are painted
+            # This fixes "background not filling on initial show" on Windows
+            painter.setCompositionMode(QPainter.CompositionMode_Source)
+            # First fill with tiny-alpha background to cover any gaps
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 5))
+            # Then draw the pixmap with proper opacity
             painter.setOpacity(self._opacity)
             scaled = self._original_pixmap.scaled(
                 self.size(),
@@ -1570,12 +1611,31 @@ class MainWindow(QMainWindow):
             self.current_widget.setAutoFillBackground(False)
             self.content_container.setAutoFillBackground(False)
 
+    def _force_full_repaint(self):
+        """Force complete repaint to fix background not filling on initial show"""
+        # Force background label to match central widget size
+        if hasattr(self, '_background_label') and self._background_label and hasattr(self, 'central_widget'):
+            self._background_label.resize(self.central_widget.size())
+            self._background_label.update()
+        # Repaint everything
+        self.repaint()
+        if hasattr(self, 'central_widget'):
+            self.central_widget.repaint()
+        # Process all pending events to ensure rendering completes
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+
     def showEvent(self, event):
         """Ensure transparency is applied when window shows"""
-        super().showEvent(event)
-        # Double ensure transparency
+        # Re-set transparency attribute BEFORE showing
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.update()
+        super().showEvent(event)
+        # Only update background if central widget already exists
+        # (showEvent might be called before _create_main_ui runs)
+        if hasattr(self, 'central_widget') and hasattr(self, '_update_background'):
+            self._update_background()
+        # Force repaint after window is visible
+        self._force_full_repaint()
 
     def resizeEvent(self, event):
         """Handle window resize to update background scaling"""
@@ -1618,6 +1678,50 @@ class MainWindow(QMainWindow):
             return 'bottom'
         return None
 
+    def _update_cursor_for_position(self, pos):
+        """Update cursor based on position relative to window edges
+
+        Args:
+            pos: Mouse position in window coordinates
+        """
+        width = self.width()
+        height = self.height()
+        margin = self._resize_margin
+
+        # Determine resize direction
+        left = pos.x() < margin
+        right = pos.x() > width - margin
+        top = pos.y() < margin
+        bottom = pos.y() > height - margin
+
+        if top and left:
+            self.setCursor(Qt.SizeFDiagCursor)
+            self._resize_direction = 'top-left'
+        elif top and right:
+            self.setCursor(Qt.SizeBDiagCursor)
+            self._resize_direction = 'top-right'
+        elif bottom and left:
+            self.setCursor(Qt.SizeBDiagCursor)
+            self._resize_direction = 'bottom-left'
+        elif bottom and right:
+            self.setCursor(Qt.SizeFDiagCursor)
+            self._resize_direction = 'bottom-right'
+        elif top:
+            self.setCursor(Qt.SizeVerCursor)
+            self._resize_direction = 'top'
+        elif bottom:
+            self.setCursor(Qt.SizeVerCursor)
+            self._resize_direction = 'bottom'
+        elif left:
+            self.setCursor(Qt.SizeHorCursor)
+            self._resize_direction = 'left'
+        elif right:
+            self.setCursor(Qt.SizeHorCursor)
+            self._resize_direction = 'right'
+        else:
+            if self._resize_direction is None:
+                self.setCursor(Qt.ArrowCursor)
+
     def mousePressEvent(self, event):
         """Handle mouse press for dragging the frameless window or resizing"""
         if event.button() == Qt.LeftButton:
@@ -1643,125 +1747,76 @@ class MainWindow(QMainWindow):
 
     def mouseMoveEvent(self, event):
         """Handle mouse move for dragging the frameless window or resizing"""
-        from PySide6.QtGui import QCursor
+        from PySide6.QtCore import Qt
 
-        # Always keep correct cursor shape during active resizing
-        if self._resize_direction is not None:
-            # Set cursor shape based on current resize direction
-            if self._resize_direction in ['left', 'right']:
-                self.setCursor(Qt.SizeHorCursor)
-            elif self._resize_direction in ['top', 'bottom']:
-                self.setCursor(Qt.SizeVerCursor)
-            elif self._resize_direction in ['top-left', 'bottom-right']:
-                self.setCursor(Qt.SizeFDiagCursor)
-            elif self._resize_direction in ['top-right', 'bottom-left']:
-                self.setCursor(Qt.SizeBDiagCursor)
+        if self._resize_direction is not None and event.buttons() & Qt.LeftButton:
+            # Handle resize with optimized calculation
+            delta = event.globalPosition() - self._resize_start_pos
+            g = self._resize_start_geometry
 
-        if event.buttons() == Qt.LeftButton:
-            if self._resize_direction is not None:
-                # Get current mouse position in global screen coordinates
-                mouse_global = event.globalPosition().toPoint()
+            # Apply resize based on direction with minimum size constraints
+            min_width = 400
+            min_height = 500
 
-                # Get the starting geometry (from when mouse was first pressed)
-                start = self._resize_start_geometry
-                if not start:
+            new_width = g.width()
+            new_height = g.height()
+            new_x = g.x()
+            new_y = g.y()
+
+            if 'right' in self._resize_direction:
+                new_width = max(min_width, g.width() + delta.x())
+            if 'left' in self._resize_direction:
+                new_width = max(min_width, g.width() - delta.x())
+                new_x = g.x() + g.width() - new_width
+            if 'bottom' in self._resize_direction:
+                new_height = max(min_height, g.height() + delta.y())
+            if 'top' in self._resize_direction:
+                new_height = max(min_height, g.height() - delta.y())
+                new_y = g.y() + g.height() - new_height
+
+            self.setGeometry(int(new_x), int(new_y), int(new_width), int(new_height))
+            event.accept()
+            return
+
+        # Handle window dragging
+        if self._drag_position is not None and event.buttons() & Qt.LeftButton:
+            # Move window to new position
+            new_pos = event.globalPosition().toPoint() - self._drag_position
+            self.move(new_pos)
+            event.accept()
+            return
+
+        # Update cursor for resize detection
+        self._update_cursor_for_position(event.position().toPoint())
+
+        # Forward to children - check if any child frame has mouse handlers
+        if self.current_widget:
+            from PySide6.QtGui import QMouseEvent
+            from PySide6.QtCore import QPointF
+
+            # Only forward if not on window edge
+            pos = event.position().toPoint()
+            margin = self._resize_margin
+            on_edge = (pos.x() < margin or pos.x() > self.width() - margin or
+                       pos.y() < margin or pos.y() > self.height() - margin)
+
+            if not on_edge and hasattr(self.current_widget, 'mouseMoveEvent'):
+                # Create new event with position relative to child
+                child_pos = self.current_widget.mapFromParent(pos)
+                new_event = QMouseEvent(
+                    event.type(),
+                    QPointF(child_pos),
+                    event.globalPosition(),
+                    event.button(),
+                    event.buttons(),
+                    event.modifiers()
+                )
+                self.current_widget.mouseMoveEvent(new_event)
+                if new_event.isAccepted():
                     event.accept()
                     return
 
-                # Initialize with starting values
-                new_x = start.x()
-                new_y = start.y()
-                new_right = start.x() + start.width()
-                new_bottom = start.y() + start.height()
-
-                # Directly set the edge being dragged to current mouse position
-                # This guarantees the dragged edge is always exactly under the mouse
-                if 'left' in self._resize_direction:
-                    new_x = mouse_global.x()
-                if 'right' in self._resize_direction:
-                    new_right = mouse_global.x()
-                if 'top' in self._resize_direction:
-                    new_y = mouse_global.y()
-                if 'bottom' in self._resize_direction:
-                    new_bottom = mouse_global.y()
-
-                # Calculate new dimensions
-                new_width = new_right - new_x
-                new_height = new_bottom - new_y
-
-                # Fix: when dragging top to resize, new_bottom should be the current bottom
-                # If we're only dragging top, keep bottom at current position, not starting position
-                if 'top' in self._resize_direction and not 'bottom' in self._resize_direction:
-                    current_geo = self.geometry()
-                    new_bottom = current_geo.y() + current_geo.height()
-
-                # Fix: same for left - when dragging left only, keep right at current position
-                if 'left' in self._resize_direction and not 'right' in self._resize_direction:
-                    current_geo = self.geometry()
-                    new_right = current_geo.x() + current_geo.width()
-
-                # Recalculate after fixes
-                new_width = new_right - new_x
-                new_height = new_bottom - new_y
-
-                # Apply minimum size constraints
-                if new_width < self.minimumWidth():
-                    # If we're dragging left edge, fix it to maintain minimum width
-                    if 'left' in self._resize_direction:
-                        new_x = new_right - self.minimumWidth()
-                    else:
-                        new_right = new_x + self.minimumWidth()
-                    new_width = self.minimumWidth()
-
-                if new_height < self.minimumHeight():
-                    if 'top' in self._resize_direction:
-                        new_y = new_bottom - self.minimumHeight()
-                    else:
-                        new_bottom = new_y + self.minimumHeight()
-                    new_height = self.minimumHeight()
-
-                self.setGeometry(new_x, new_y, new_width, new_height)
-                event.accept()
-                return
-
-            elif self._drag_position is not None:
-                # Handle dragging
-                self.move(event.globalPosition().toPoint() - self._drag_position)
-                event.accept()
-        else:
-            # Update cursor shape when hovering over edges
-            direction = self._get_resize_direction(event.position().toPoint())
-            if direction is None:
-                # Not on resize edge - use custom cursor if enabled
-                if self._special_cursor_on_hover:
-                    from PySide6.QtGui import QCursor, QPixmap
-                    import os
-                    script_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-                    cur_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.cur')
-                    png_path = os.path.join(script_dir, '..', 'assets', 'custom_cursor.png')
-                    custom_cursor = None
-                    if os.path.exists(cur_path):
-                        pixmap = QPixmap(cur_path)
-                        if not pixmap.isNull():
-                            custom_cursor = QCursor(pixmap, 0, 0)
-                    elif os.path.exists(png_path):
-                        pixmap = QPixmap(png_path)
-                        if not pixmap.isNull():
-                            custom_cursor = QCursor(pixmap, 0, 0)
-                    if custom_cursor and not custom_cursor.pixmap().isNull():
-                        self.setCursor(custom_cursor)
-                    else:
-                        self.setCursor(Qt.PointingHandCursor)
-                else:
-                    self.setCursor(Qt.ArrowCursor)
-            elif direction in ['left', 'right']:
-                self.setCursor(Qt.SizeHorCursor)
-            elif direction in ['top', 'bottom']:
-                self.setCursor(Qt.SizeVerCursor)
-            elif direction in ['top-left', 'bottom-right']:
-                self.setCursor(Qt.SizeFDiagCursor)
-            elif direction in ['top-right', 'bottom-left']:
-                self.setCursor(Qt.SizeBDiagCursor)
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         """Handle mouse release to finish dragging or resizing"""
@@ -1831,22 +1886,54 @@ class MainWindow(QMainWindow):
 
     def start_fish_sync(self):
         """Start syncing fish data from official website"""
-        try:
-            from ..core.fish_sync import FishSyncDialog
-            dialog = FishSyncDialog(self, self.data_dir)
-            dialog.exec()
-        except ImportError as e:
-            QMessageBox.warning(
-                self,
-                "缺少依赖",
-                f"数据同步功能需要安装额外依赖:\n{str(e)}\n\n请运行:\ncd qt\npip install lxml pandas"
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "启动失败",
-                f"数据同步启动失败:\n{str(e)}"
-            )
+        self._on_sync_fish()
+
+    def _on_sync_fish(self):
+        """Sync fish names from RF4 official website"""
+        from ..core.fish_sync import FishSynchronizer
+
+        self.show_loading("正在同步鱼种数据...", "从 RF4 官网获取最新鱼种列表")
+
+        def sync_thread():
+            try:
+                synchronizer = FishSynchronizer(self.data_dir)
+                result = synchronizer.sync_from_official()
+                # Update UI from main thread
+                from PySide6.QtCore import QMetaObject, Qt, Q_ARG
+                QMetaObject.invokeMethod(
+                    self, "_on_sync_complete",
+                    Qt.QueuedConnection,
+                    Q_ARG(bool, result.success),
+                    Q_ARG(str, result.message)
+                )
+            except Exception as e:
+                QMetaObject.invokeMethod(
+                    self, "_on_sync_complete",
+                    Qt.QueuedConnection,
+                    Q_ARG(bool, False),
+                    Q_ARG(str, str(e))
+                )
+
+        import threading
+        threading.Thread(target=sync_thread, daemon=True).start()
+
+    def _on_sync_complete(self, success: bool, message: str):
+        """Callback when fish sync completes"""
+        self.hide_loading()
+
+        if success:
+            icon = QMessageBox.Information
+            title = "同步成功"
+        else:
+            icon = QMessageBox.Warning
+            title = "同步失败"
+
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(icon)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.addButton(QMessageBox.Ok)
+        msg_box.show()
 
     def _init_screen_recorder(self):
         """Initialize screen recorder with loaded settings"""
@@ -1892,25 +1979,6 @@ class MainWindow(QMainWindow):
             )
         except Exception as e:
             print(f"Failed to update screen recorder settings: {e}")
-
-    def closeEvent(self, event):
-        """Handle window closing - save all data and cleanup"""
-        # Cleanup screen recorder
-        if self._screen_recorder:
-            if self._screen_recorder.is_currently_recording():
-                self._screen_recorder.stop_recording()
-            self._screen_recorder.unregister_hotkeys()
-
-        # Save data from all cached frames
-        if "activity_stats" in self._frame_cache:
-            self._frame_cache["activity_stats"].save_data()
-        if "storage" in self._frame_cache:
-            self._frame_cache["storage"].save_data()
-        if "bait" in self._frame_cache:
-            self._frame_cache["bait"].save_data()
-        if "daily_tasks" in self._frame_cache:
-            self._frame_cache["daily_tasks"].save_data()
-        event.accept()
 
     def enterEvent(self, event):
         """Mouse enters window - change to hand cursor if enabled
@@ -2021,6 +2089,9 @@ class MainWindow(QMainWindow):
 
         # Create loading screen
         self._create_loading_screen()
+
+        # Register keyboard shortcuts
+        self._register_shortcuts()
 
         # Start background loading
         self._start_background_loading()
@@ -2174,3 +2245,89 @@ class MainWindow(QMainWindow):
     def event(self, event):
         """Main event handler"""
         return super().event(event)
+
+    def _register_shortcuts(self):
+        """Register global keyboard shortcuts"""
+        from .shortcuts import ShortcutManager
+
+        self.shortcut_manager = ShortcutManager(self)
+
+        # Navigation shortcuts
+        self.shortcut_manager.register_shortcut(
+            "home", "Esc", self.show_home_page, "返回主页"
+        )
+        self.shortcut_manager.register_shortcut(
+            "refresh", "F5", self._refresh_current_page, "刷新当前页面"
+        )
+
+        # Quick access shortcuts
+        self.shortcut_manager.register_shortcut(
+            "activity", "Ctrl+1", self.show_activity_stats, "活动统计"
+        )
+        self.shortcut_manager.register_shortcut(
+            "storage", "Ctrl+2", self.show_storage, "存储时长"
+        )
+        self.shortcut_manager.register_shortcut(
+            "statistics", "Ctrl+3", self.show_statistics, "数据分析"
+        )
+        self.shortcut_manager.register_shortcut(
+            "settings", "Ctrl+,", self.open_app_settings, "应用设置"
+        )
+
+        # Window shortcuts
+        self.shortcut_manager.register_shortcut(
+            "minimize", "Ctrl+M", self.showMinimized, "最小化窗口"
+        )
+        self.shortcut_manager.register_shortcut(
+            "fullscreen", "F11", self._toggle_fullscreen, "全屏切换"
+        )
+        self.shortcut_manager.register_shortcut(
+            "help", "F1", self.shortcut_manager.show_shortcut_help, "快捷键帮助"
+        )
+
+    def _refresh_current_page(self):
+        """Refresh the currently displayed page"""
+        if hasattr(self, 'current_widget') and self.current_widget:
+            # Try common refresh methods
+            for method_name in ['refresh_plots', 'update_data', 'update_table', 'update_display']:
+                if hasattr(self.current_widget, method_name):
+                    method = getattr(self.current_widget, method_name)
+                    try:
+                        method()
+                    except:
+                        pass
+            # For ActivityFrame, update both activity types
+            if hasattr(self.current_widget, 'current_character') and self.current_widget.current_character:
+                from src.core.models import ActivityType
+                for at in [ActivityType.GRINDING, ActivityType.STAR_WAITING]:
+                    self.current_widget.update_display(at)
+
+    def _toggle_fullscreen(self):
+        """Toggle fullscreen mode"""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def show_loading(self, message: str = "加载中...", detail: str = ""):
+        """Show global loading overlay"""
+        self.loading_overlay.show_loading(message, detail)
+
+    def hide_loading(self):
+        """Hide global loading overlay"""
+        self.loading_overlay.hide_loading()
+
+    def show_toast(self, title: str, message: str = "", status: str = "info", duration: int = 3000):
+        """Show a toast notification
+
+        Args:
+            title: Main title
+            message: Optional detail message
+            status: Toast type (info/success/warning/error)
+            duration: Auto-hide duration in ms
+        """
+        if not hasattr(self, '_toast'):
+            from .toast import Toast
+            self._toast = Toast(self)
+
+        self._toast.show_message(title, message, status, duration)

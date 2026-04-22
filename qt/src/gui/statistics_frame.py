@@ -725,7 +725,10 @@ class StatisticsFrame(QWidget):
 
             # Add all grinding goals
             for goal_idx, goal in enumerate(char.grinding_goals):
-                total_value, total_duration, _ = char.calculate_totals(ActivityType.GRINDING)
+                _, total_duration, _ = char.calculate_totals(ActivityType.GRINDING)
+                # Use goal's own current_progress instead of total from records
+                # This ensures cumulative progress is correct even when records are filtered
+                total_value = goal.current_progress
 
                 # Calculate progress
                 progress_value_pct = (total_value / goal.target_value * 100) if goal.target_value > 0 else 100
@@ -860,7 +863,10 @@ class StatisticsFrame(QWidget):
 
             # Add all star waiting goals
             for goal_idx, goal in enumerate(char.star_waiting_goals):
-                total_value, total_duration, _ = char.calculate_totals(ActivityType.STAR_WAITING)
+                _, total_duration, _ = char.calculate_totals(ActivityType.STAR_WAITING)
+                # Use goal's own current_progress instead of total from records
+                # This ensures cumulative progress is correct even when records are filtered
+                total_value = goal.current_progress
 
                 # Calculate progress
                 progress_value_pct = (total_value / goal.target_value * 100) if goal.target_value > 0 else 100

@@ -1,5 +1,6 @@
 """Activity statistics frame (grinding + star waiting)"""
 import os
+import threading
 from datetime import date, datetime
 from typing import List, Optional
 from PySide6.QtWidgets import (
@@ -296,6 +297,9 @@ class ActivityFrame(QWidget):
         self._progress_bars[activity_type] = []
 
         if not self.current_character:
+            scroll_layout.addStretch()
+            scroll.setWidget(scroll_content)
+            progress_layout.addWidget(scroll)
             return
 
         # When only_today=True is used for loading, records only contains today's data
@@ -824,38 +828,69 @@ class ActivityFrame(QWidget):
             self.suggestion_label.setText("没有设置任何目标，无法生成建议\n请在各角色中设置搬砖/蹲星目标")
             return
 
-        # Load daily tasks and pass to calculator
-        data_dir = os.path.dirname(self.persistence.file_path)
-        daily_task_persistence = DailyTaskPersistence(os.path.join(data_dir, 'daily_tasks.json'))
-        daily_tasks = daily_task_persistence.load_tasks()
+        # Show loading overlay while calculating
+        main_window = self.window()
+        if hasattr(main_window, 'show_loading'):
+            main_window.show_loading("正在生成建议...", "优化算法计算中，请稍候")
 
-        suggestion = calculate_suggestion_for_all(self.characters, self.global_suggestion_settings, daily_tasks)
+        def calculation_thread():
+            """Run calculation in background thread"""
+            # Load daily tasks and pass to calculator
+            data_dir = os.path.dirname(self.persistence.file_path)
+            daily_task_persistence = DailyTaskPersistence(os.path.join(data_dir, 'daily_tasks.json'))
+            daily_tasks = daily_task_persistence.load_tasks()
+
+            suggestion = calculate_suggestion_for_all(self.characters, self.global_suggestion_settings, daily_tasks)
+
+            # Invoke back to main thread
+            from PySide6.QtCore import QMetaObject, Qt, Q_ARG
+            QMetaObject.invokeMethod(
+                self, "_on_calculation_done",
+                Qt.QueuedConnection,
+                Q_ARG(object, suggestion)
+            )
+
+        threading.Thread(target=calculation_thread, daemon=True).start()
+
+    def _on_calculation_done(self, suggestion):
+        """Callback when suggestion calculation is complete
+
+        This method is invoked from the background thread after calculation completes
+        """
         if not suggestion:
             self.suggestion_label.setText("所有目标已完成！恭喜！")
-            return
-
-        # Show suggestion in a separate dialog with table
-        dialog = SuggestionResultDialog(self, self.characters, suggestion, self.global_suggestion_settings)
-        dialog.exec()
-
-        # Update summary text in the label
-        # Handle case where algorithm might be stored as string
-        if isinstance(self.global_suggestion_settings.algorithm, str):
-            algorithm_val = self.global_suggestion_settings.algorithm
         else:
-            algorithm_val = self.global_suggestion_settings.algorithm.value
+            # Show suggestion in a separate dialog with table
+            dialog = SuggestionResultDialog(self, self.characters, suggestion, self.global_suggestion_settings)
+            dialog.exec()
 
-        text = (
-            f"算法: {'当日收入最大化' if algorithm_val == 'daily_income' else '均衡完成(总收入最大化)'}\n"
-            f"预计还需要 {suggestion.estimated_days_remaining:.1f} 天完成全部目标\n"
-            f"预计剩余总收入: {suggestion.estimated_total_income:,} 人民币\n"
-            f"\n点击上方'获取建议'重新查看完整表格"
-        )
-        self.suggestion_label.setText(text)
+            # Update summary text in the label
+            # Handle case where algorithm might be stored as string
+            if isinstance(self.global_suggestion_settings.algorithm, str):
+                algorithm_val = self.global_suggestion_settings.algorithm
+            else:
+                algorithm_val = self.global_suggestion_settings.algorithm.value
+
+            text = (
+                f"算法: {'当日收入最大化' if algorithm_val == 'daily_income' else '均衡完成(总收入最大化)'}\n"
+                f"预计还需要 {suggestion.estimated_days_remaining:.1f} 天完成全部目标\n"
+                f"预计剩余总收入: {suggestion.estimated_total_income:,} 人民币\n"
+                f"\n点击上方'获取建议'重新查看完整表格"
+            )
+            self.suggestion_label.setText(text)
+
+        # Hide loading overlay
+        main_window = self.window()
+        if hasattr(main_window, 'hide_loading'):
+            main_window.hide_loading()
 
     def save_data(self):
         """Save all data to persistence"""
         self.persistence.save_characters(self.characters, self.global_suggestion_settings)
+        # Show toast instead of message box
+        window = self.window()
+        if hasattr(window, 'show_toast'):
+            window.show_toast("保存成功", "数据已保存", "success", 2000)
 
     def view_history(self, activity_type: ActivityType):
         """Open history view dialog"""

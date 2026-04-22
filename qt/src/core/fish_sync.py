@@ -1,5 +1,6 @@
 """Fish data synchronization from official website"""
 import os
+from dataclasses import dataclass
 from lxml import etree
 import pandas as pd
 from PySide6.QtWidgets import (
@@ -9,6 +10,83 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import QUrl
+
+
+@dataclass
+class SyncResult:
+    """Result of fish synchronization"""
+    success: bool
+    message: str
+    fish_count: int = 0
+
+
+class FishSynchronizer:
+    """Fish data synchronizer that extracts fish names from RF4 official website"""
+
+    def __init__(self, data_dir: str):
+        self.data_dir = data_dir
+
+    def sync_from_official(self) -> SyncResult:
+        """Synchronize fish names from RF4 official website by downloading the page directly
+
+        Returns:
+            SyncResult with success status and message
+        """
+        try:
+            import requests
+            url = "https://rf4game.com/cn/records/"
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            html = response.text
+            return self._parse_html(html)
+        except ImportError:
+            return SyncResult(success=False, message="缺少requests依赖，请运行: pip install requests")
+        except Exception as e:
+            return SyncResult(success=False, message=f"下载失败: {str(e)}")
+
+    def _parse_html(self, html: str) -> SyncResult:
+        """Parse HTML and extract fish names
+
+        Args:
+            html: Full HTML content from the records page
+
+        Returns:
+            SyncResult with success status and message
+        """
+        try:
+            tree = etree.HTML(html)
+            result = []
+            i = 1
+            while True:
+                text = tree.xpath(
+                    f'//*[@id="tabular_body"]/div[1]/div/div[2]/div[2]/div[{i}]/div/div[1]/div[1]/div/div[2]/text()'
+                )
+                if not text:
+                    break
+                name = text[0].strip()
+                if name:
+                    result.append(name)
+                i += 1
+
+            if not result:
+                return SyncResult(success=False, message="未找到任何鱼种数据，请检查网页内容")
+
+            # Save to CSV file
+            csv_fish = pd.Series(result)
+            csv_fish = csv_fish.str.replace("'", "", regex=False)
+
+            output_path = os.path.join(self.data_dir, 'fish_names.csv')
+            os.makedirs(self.data_dir, exist_ok=True)
+            csv_fish.to_csv(output_path, index=False, header=False, encoding='utf-8')
+
+            return SyncResult(
+                success=True,
+                message=f"鱼种数据同步成功！\n\n共 {len(result)} 个鱼种已保存到:\n{output_path}",
+                fish_count=len(result)
+            )
+
+        except Exception as e:
+            return SyncResult(success=False, message=f"同步失败: {str(e)}")
 
 
 class FishSyncDialog(QDialog):
@@ -144,50 +222,20 @@ class FishSyncDialog(QDialog):
         if element:
             self._log("✅ 数据表格已加载，开始爬取鱼种名称...")
             self.check_timer.stop()
-            self._scrape_data(html)
+            synchronizer = FishSynchronizer(self.data_dir)
+            result = synchronizer._parse_html(html)
+            if result.success:
+                self._log(f"✅ 爬取完成，共找到 {result.fish_count} 种鱼种")
+                self._log(f"✅ 数据已保存到: {os.path.join(self.data_dir, 'fish_names.csv')}")
+                QMessageBox.information(
+                    self,
+                    "同步完成",
+                    result.message
+                )
+            else:
+                self._log(f"❌ {result.message}")
+            self._finish()
         # else: keep waiting, timer will check again next second
-
-    def _scrape_data(self, html):
-        """Extract fish names from HTML"""
-        tree = etree.HTML(html)
-        result = []
-        i = 1
-        while True:
-            text = tree.xpath(
-                f'//*[@id="tabular_body"]/div[1]/div/div[2]/div[2]/div[{i}]/div/div[1]/div[1]/div/div[2]/text()'
-            )
-            if not text:
-                break
-            name = text[0].strip()
-            if name:
-                result.append(name)
-            i += 1
-
-        self._log(f"✅ 爬取完成，共找到 {len(result)} 种鱼种")
-        self._save_to_csv(result)
-
-    def _save_to_csv(self, data):
-        """Save to CSV file"""
-        csv_fish = pd.Series(data)
-        csv_fish = csv_fish.str.replace("'", "", regex=False)
-
-        # Save to data directory
-        output_path = os.path.join(
-            self.data_dir, 'fish_names.csv'
-        )
-        csv_fish.to_csv(output_path, index=False, header=False, encoding='utf-8')
-
-        self._log(f"✅ 数据已保存到: {output_path}")
-        self._log(f"   共 {len(data)} 个鱼种名称")
-        self._finish()
-
-        # Show success message
-        df = pd.read_csv(output_path, header=None)
-        QMessageBox.information(
-            self,
-            "同步完成",
-            f"鱼种数据同步成功！\n\n共 {len(df)} 个鱼种已保存到:\n{output_path}"
-        )
 
     def _finish(self):
         """Called when sync completes"""
