@@ -21,94 +21,76 @@ from src.core.models import FriendLink, ActivityType
 
 
 class LoadingWidget(QWidget):
-    """Loading screen widget displayed during startup"""
+    """Loading screen widget displayed during startup - optimized for fast rendering"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        window = self.window()
-        is_dark = True
-        if hasattr(window, '_current_theme'):
-            is_dark = (window._current_theme == "dark")
 
-        if is_dark:
-            self.setStyleSheet("""
-                LoadingWidget {
-                    background-color: #1a1a1a;
-                }
-            """)
-        else:
-            self.setStyleSheet("""
-                LoadingWidget {
-                    background-color: #f5f5f5;
-                }
-            """)
+        # Force dark theme during loading (faster than checking parent)
+        # Main window applies actual theme after loading completes
+        self.setStyleSheet("""
+            LoadingWidget {
+                background-color: #1a1a1a;
+            }
+        """)
 
+        # Use simplified layout for faster rendering
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(20)
+        layout.setContentsMargins(50, 50, 50, 50)
 
-        # Title
+        # Title - bold and clear
         title = QLabel("RF4 数据统计工具")
         title.setFont(QFont("Segoe UI", 32, QFont.Bold))
-        if is_dark:
-            title.setStyleSheet("color: #ffffff;")
-        else:
-            title.setStyleSheet("color: #000000;")
+        title.setStyleSheet("color: #ffffff;")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        # Spacer
-        spacer = QWidget()
-        spacer.setFixedHeight(30)
-        layout.addWidget(spacer)
-
-        # Loading spinner using progress bar
+        # Loading spinner - smooth indeterminate progress bar
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)  # Indeterminate mode
         self.progress.setTextVisible(False)
-        self.progress.setFixedSize(200, 8)
-        if is_dark:
-            self.progress.setStyleSheet("""
-                QProgressBar {
-                    background-color: #2d2d2d;
-                    border-radius: 4px;
-                    border: none;
-                }
-                QProgressBar::chunk {
-                    background-color: #1f6feb;
-                    border-radius: 4px;
-                }
-            """)
-        else:
-            self.progress.setStyleSheet("""
-                QProgressBar {
-                    background-color: #e0e0e0;
-                    border-radius: 4px;
-                    border: none;
-                }
-                QProgressBar::chunk {
-                    background-color: #1f6feb;
-                    border-radius: 4px;
-                }
-            """)
+        self.progress.setFixedSize(250, 8)
+        self.progress.setStyleSheet("""
+            QProgressBar {
+                background-color: #2d2d2d;
+                border-radius: 4px;
+                border: none;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #1f6feb, stop:0.5 #4a9eff, stop:1 #1f6feb);
+                border-radius: 4px;
+            }
+        """)
         layout.addWidget(self.progress, alignment=Qt.AlignCenter)
 
-        # Spacer
-        spacer2 = QWidget()
-        spacer2.setFixedHeight(20)
-        layout.addWidget(spacer2)
+        # Loading status text
+        self.status_label = QLabel("正在初始化...")
+        self.status_label.setFont(QFont("Segoe UI", 14))
+        self.status_label.setStyleSheet("color: #888888;")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.status_label)
 
-        # Loading text
-        label = QLabel("正在加载数据...")
-        label.setFont(QFont("Segoe UI", 16))
-        if is_dark:
-            label.setStyleSheet("color: #cccccc;")
-        else:
-            label.setStyleSheet("color: #666666;")
-        label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(label)
+        # Start status animation
+        self._status_messages = [
+            "正在初始化...",
+            "加载数据文件...",
+            "准备界面组件...",
+            "即将完成..."
+        ]
+        self._message_index = 0
+        from PySide6.QtCore import QTimer
+        self._status_timer = QTimer(self)
+        self._status_timer.timeout.connect(self._update_status)
+        self._status_timer.start(800)  # Update every 800ms
 
-        self.setLayout(layout)
+    def _update_status(self):
+        """Cycle through loading status messages for better user feedback"""
+        self._message_index = (self._message_index + 1) % len(self._status_messages)
+        self.status_label.setText(self._status_messages[self._message_index])
 
 
 class MainWindow(QMainWindow):
@@ -182,6 +164,11 @@ class MainWindow(QMainWindow):
 
         # Home page navigation buttons (for theme updates)
         self._home_buttons = []
+
+        # Pre-cached dialogs (lazy loaded for performance)
+        self._cached_settings_dialog = None
+        self._cached_backup_dialog = None
+        self._cached_friend_links_dialog = None
 
         # Window setup
         self.setWindowTitle("RF4 Data Process")
@@ -833,6 +820,12 @@ class MainWindow(QMainWindow):
             # Data loaded, just wait for video to finish before switching UI
             return
 
+        # Clean up loading widget resources
+        if hasattr(self, 'loading_widget') and self.loading_widget:
+            # Stop status update timer
+            if hasattr(self.loading_widget, '_status_timer'):
+                self.loading_widget._status_timer.stop()
+
         # Apply loaded theme
         self._apply_current_theme()
 
@@ -847,6 +840,10 @@ class MainWindow(QMainWindow):
 
         # Initialize screen recorder
         self._init_screen_recorder()
+
+        # Pre-create dialogs in background after a short delay
+        # This makes dialogs open instantly when clicked
+        QTimer.singleShot(1000, self._precache_dialogs)
 
     def _create_main_ui(self):
         """Create the main UI after loading"""
@@ -1415,24 +1412,65 @@ class MainWindow(QMainWindow):
             self._frame_cache["daily_tasks"].save_data()
         event.accept()
 
-    def open_app_settings(self):
-        """Open application settings dialog"""
+    def _precache_dialogs(self):
+        """Pre-create dialogs in background for instant opening"""
+        # Pre-create settings dialog (most frequently used)
+        self._get_cached_settings_dialog()
+
+    def _get_cached_settings_dialog(self):
+        """Get or create cached settings dialog with current values"""
         from .dialogs.app_settings_dialog import AppSettingsDialog
-        dialog = AppSettingsDialog(
-            self,
-            self._background_image_path,
-            self._background_opacity,
-            self._current_theme,
-            self._show_income_info,
-            self._screen_recorder_start_hotkey,
-            self._screen_recorder_stop_hotkey,
-            self._screen_recorder_save_path,
-            self._screen_recorder_record_mic,
-            self._screen_recorder_record_system,
-            self._special_cursor_on_hover,
-            getattr(self, '_enable_performance_log', True)
-        )
-        dialog.settings_changed.connect(self._on_app_settings_changed)
+
+        if self._cached_settings_dialog is None:
+            self._cached_settings_dialog = AppSettingsDialog(
+                self,
+                self._background_image_path,
+                self._background_opacity,
+                self._current_theme,
+                self._show_income_info,
+                self._screen_recorder_start_hotkey,
+                self._screen_recorder_stop_hotkey,
+                self._screen_recorder_save_path,
+                self._screen_recorder_record_mic,
+                self._screen_recorder_record_system,
+                self._special_cursor_on_hover,
+                getattr(self, '_enable_performance_log', True)
+            )
+            self._cached_settings_dialog.settings_changed.connect(self._on_app_settings_changed)
+        else:
+            # Update dialog values before showing
+            self._cached_settings_dialog.selected_image_path = self._background_image_path
+            self._cached_settings_dialog.selected_save_path = self._screen_recorder_save_path
+            self._cached_settings_dialog.current_record_mic = self._screen_recorder_record_mic
+            self._cached_settings_dialog.current_record_system = self._screen_recorder_record_system
+            self._cached_settings_dialog.current_special_cursor = self._special_cursor_on_hover
+            self._cached_settings_dialog.current_performance_log = self._enable_performance_log
+
+            # Update UI elements
+            self._cached_settings_dialog.dark_checkbox.setChecked(self._current_theme == "dark")
+            self._cached_settings_dialog.clear_checkbox.setChecked(self._background_image_path is None)
+            if self._background_image_path:
+                self._cached_settings_dialog.path_edit.setText(self._background_image_path)
+            else:
+                self._cached_settings_dialog.path_edit.setText("未选择图片")
+            self._cached_settings_dialog.opacity_slider.setValue(int(self._background_opacity * 100))
+            self._cached_settings_dialog.show_income_checkbox.setChecked(self._show_income_info)
+            self._cached_settings_dialog.start_hotkey_edit.setText(self._screen_recorder_start_hotkey)
+            self._cached_settings_dialog.stop_hotkey_edit.setText(self._screen_recorder_stop_hotkey)
+            if self._screen_recorder_save_path:
+                self._cached_settings_dialog.save_path_edit.setText(self._screen_recorder_save_path)
+            self._cached_settings_dialog.record_mic_checkbox.setChecked(self._screen_recorder_record_mic)
+            self._cached_settings_dialog.record_system_checkbox.setChecked(self._screen_recorder_record_system)
+            self._cached_settings_dialog.special_cursor_checkbox.setChecked(self._special_cursor_on_hover)
+            self._cached_settings_dialog.perf_log_checkbox.setChecked(self._enable_performance_log)
+            # Force audio devices to re-populate on next show
+            self._cached_settings_dialog._audio_devices_populated = False
+
+        return self._cached_settings_dialog
+
+    def open_app_settings(self):
+        """Open application settings dialog - uses cached instance for speed"""
+        dialog = self._get_cached_settings_dialog()
         dialog.exec()
 
     def _on_app_settings_changed(self, image_path: str, opacity: float, theme: str, show_income: bool,
@@ -2057,6 +2095,11 @@ class MainWindow(QMainWindow):
 
         # Home page navigation buttons (for theme updates)
         self._home_buttons = []
+
+        # Pre-cached dialogs (lazy loaded for performance)
+        self._cached_settings_dialog = None
+        self._cached_backup_dialog = None
+        self._cached_friend_links_dialog = None
 
         # Enable mouse tracking
         self.setMouseTracking(True)

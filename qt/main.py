@@ -1,33 +1,28 @@
 """
 RF4 Data Process Application
-Main entry point for PySide6 version
+Main entry point for PySide6 version - optimized for fast startup
 """
 import os
 import sys
-import logging
 
-# Add src to path
+# 启动时间测量 - 第一行就开始
+import time
+start_time = time.time()
+
+# Add src to path - do this EARLY before any other imports
 src_path = os.path.join(os.path.dirname(__file__), 'src')
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-# Configure logging for performance monitoring
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%H:%M:%S'
-)
-
+# 延迟导入：只导入最核心的，其他在后面按需导入
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
-from src.gui.main_window import MainWindow
-from src.gui.desktop_reminder import DesktopReminder
-from src.utils.performance_monitor import PerformanceMonitor
+# 延迟重模块导入 - 在函数内部按需导入
 
 
 def main():
-    """Main entry point"""
+    """Main entry point - optimized for fast startup"""
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
@@ -41,6 +36,7 @@ def main():
     os.makedirs(app_dir, exist_ok=True)
 
     # Load app settings first to check if performance logging is enabled
+    # Do this BEFORE creating main window to avoid delays
     from src.data.persistence import AppSettingsPersistence
     app_settings_persistence = AppSettingsPersistence(os.path.join(app_dir, 'app_settings.json'))
     settings = app_settings_persistence.load_settings()
@@ -49,28 +45,41 @@ def main():
     # Start performance monitor if enabled
     perf_monitor = None
     if enable_performance_log:
+        from src.utils.performance_monitor import PerformanceMonitor
         perf_monitor = PerformanceMonitor(interval_seconds=10.0)
         perf_monitor.start()
         if perf_monitor:
             perf_monitor.log_current()
 
-    # Create main window
+    # Create and show main window immediately
+    # The loading screen will be visible while background data loads
+    from src.gui.main_window import MainWindow
     main_window = MainWindow(app_dir)
     main_window.show()
 
     if perf_monitor:
         perf_monitor.log_current()
 
-    # Create desktop floating reminder
-    desktop_reminder = DesktopReminder()
-    desktop_reminder.show()
+    # Create desktop reminder AFTER window is shown and after a delay
+    # This avoids adding more work during the critical startup phase
+    desktop_reminder = [None]  # Use list to allow modification in nested scope
+
+    def delayed_desktop_reminder_setup():
+        """Create desktop reminder after main window is fully loaded"""
+        from src.gui.desktop_reminder import DesktopReminder
+        desktop_reminder[0] = DesktopReminder()
+        desktop_reminder[0].show()
+
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(2000, delayed_desktop_reminder_setup)
 
     # Connect after data loaded to set daily task data for reminders
     def on_data_loaded():
         # Get activity characters after loading
         if main_window.activity_persistence and main_window.daily_task_persistence:
             characters, _ = main_window.activity_persistence.load_characters()
-            desktop_reminder.set_daily_task_data(main_window.daily_task_persistence, characters)
+            if desktop_reminder[0]:
+                desktop_reminder[0].set_daily_task_data(main_window.daily_task_persistence, characters)
         if perf_monitor:
             perf_monitor.log_current()
 

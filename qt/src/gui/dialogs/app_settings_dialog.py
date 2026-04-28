@@ -203,9 +203,8 @@ class AppSettingsDialog(QDialog):
 
         layout.addLayout(audio_layout)
 
-        # Populate devices after UI is created
-        self._populate_audio_devices()
-
+        # Don't populate audio devices immediately - do it lazily in showEvent
+        # This speeds up dialog creation significantly
         # Performance logging setting
         perf_layout = QHBoxLayout()
         perf_layout.addWidget(QLabel("性能监控:"))
@@ -234,6 +233,18 @@ class AppSettingsDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
+
+        # Flag to track if audio devices have been populated
+        self._audio_devices_populated = False
+
+    def showEvent(self, event):
+        """Lazy load audio devices when dialog is shown - speeds up initial dialog creation"""
+        super().showEvent(event)
+        if not self._audio_devices_populated:
+            # Use QTimer to allow dialog to render first, then populate devices
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(50, self._populate_audio_devices)
+            self._audio_devices_populated = True
 
     def _on_theme_changed(self):
         """Update theme checkbox - only one can be selected"""
@@ -268,38 +279,55 @@ class AppSettingsDialog(QDialog):
                 self._browse_image()
 
     def _populate_audio_devices(self):
-        """Enumerate all available audio input devices and add to combo boxes"""
-        # Try to get device list from sounddevice
-        try:
-            import sounddevice as sd
-            devices = sd.query_devices()
-            device_names = []
-            for i, dev in enumerate(devices):
-                if dev['max_input_channels'] > 0:
-                    # Only include input devices
-                    name = dev['name'].strip()
-                    # Add (channels) info
-                    chan = dev['max_input_channels']
-                    device_names.append(f"{name} ({chan} ch)")
-            # Add default option
-            device_names.insert(0, "默认 (使用系统默认)")
-            # Clear and add to combo boxes
-            self.mic_device_combo.clear()
-            self.mic_device_combo.addItems(device_names)
-            self.system_device_combo.clear()
-            self.system_device_combo.addItems(device_names)
-        except ImportError:
-            # sounddevice not installed, just add default
-            self.mic_device_combo.clear()
-            self.mic_device_combo.addItem("默认 (使用系统默认)")
-            self.system_device_combo.clear()
-            self.system_device_combo.addItem("默认 (使用系统默认)")
-        except Exception as e:
-            print(f"Failed to enumerate audio devices: {e}")
-            self.mic_device_combo.clear()
-            self.mic_device_combo.addItem("默认 (使用系统默认)")
-            self.system_device_combo.clear()
-            self.system_device_combo.addItem("默认 (使用系统默认)")
+        """Enumerate all available audio input devices in background thread"""
+        # First show loading state
+        self.mic_device_combo.clear()
+        self.mic_device_combo.addItem("正在加载设备...")
+        self.system_device_combo.clear()
+        self.system_device_combo.addItem("正在加载设备...")
+
+        # Do the actual enumeration in a background thread
+        import threading
+
+        def enumerate_devices():
+            device_names = ["默认 (使用系统默认)"]
+            try:
+                import sounddevice as sd
+                devices = sd.query_devices()
+                for i, dev in enumerate(devices):
+                    if dev['max_input_channels'] > 0:
+                        name = dev['name'].strip()
+                        chan = dev['max_input_channels']
+                        device_names.append(f"{name} ({chan} ch)")
+            except ImportError:
+                pass
+            except Exception as e:
+                print(f"Failed to enumerate audio devices: {e}")
+
+            # Update UI from main thread
+            from PySide6.QtCore import QMetaObject, Qt, Q_ARG
+
+            def update_ui():
+                self.mic_device_combo.clear()
+                self.mic_device_combo.addItems(device_names)
+                self.system_device_combo.clear()
+                self.system_device_combo.addItems(device_names)
+
+            QMetaObject.invokeMethod(
+                self.mic_device_combo, "clear", Qt.QueuedConnection
+            )
+            # Use a single-shot timer to update items
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._update_audio_combos(device_names))
+
+        threading.Thread(target=enumerate_devices, daemon=True).start()
+
+    def _update_audio_combos(self, device_names):
+        """Update audio device combo boxes with device list"""
+        self.mic_device_combo.clear()
+        self.mic_device_combo.addItems(device_names)
+        self.system_device_combo.clear()
+        self.system_device_combo.addItems(device_names)
 
     def _browse_save_path(self):
         """Browse for save directory"""

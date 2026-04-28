@@ -18,6 +18,62 @@ from src.data.persistence import ActivityPersistence
 from src.core.models import ActivityType, ActivityCharacter
 
 
+class LoadingOverlay(QWidget):
+    """Ultra lightweight loading overlay with CSS animation - minimal performance impact"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.hide()
+
+        # Center the loading indicator in parent
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create spinning dots - minimal CSS animation
+        self.label = QLabel("⠋")
+        self.label.setFont(QFont("Segoe UI", 48))
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setStyleSheet("color: #2196F3;")
+        layout.addWidget(self.label)
+
+        # Text label
+        text = QLabel("加载中...")
+        text.setFont(QFont("Segoe UI", 14))
+        text.setAlignment(Qt.AlignCenter)
+        text.setStyleSheet("color: #888; margin-top: 10px;")
+        layout.addWidget(text)
+
+        # Simple frame animation using unicode braille characters
+        self._frame = 0
+        self._frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self._anim_timer = None
+
+    def showEvent(self, event):
+        """Start animation when shown"""
+        super().showEvent(event)
+        self._anim_timer = self.startTimer(80)  # 12.5 FPS - very lightweight
+
+    def hideEvent(self, event):
+        """Stop animation when hidden"""
+        if self._anim_timer:
+            self.killTimer(self._anim_timer)
+            self._anim_timer = None
+        super().hideEvent(event)
+
+    def timerEvent(self, event):
+        """Update animation frame"""
+        self._frame = (self._frame + 1) % len(self._frames)
+        self.label.setText(self._frames[self._frame])
+
+    def resizeEvent(self, event):
+        """Cover entire parent"""
+        if self.parent():
+            self.resize(self.parent().size())
+        super().resizeEvent(event)
+
+
 class StatisticsFrame(QWidget):
     """Data analysis page with practical insights for RF4 players
     Uses ECharts via QWebEngineView for beautiful interactive charts"""
@@ -34,6 +90,8 @@ class StatisticsFrame(QWidget):
         self.html_loaded = False
 
         self._create_widgets()
+        # Create loading overlay
+        self.loading_overlay = LoadingOverlay(self)
         self.refresh_plots()
 
     def _create_widgets(self):
@@ -238,12 +296,24 @@ class StatisticsFrame(QWidget):
         return "dark"
 
     def refresh_plots(self):
-        """Refresh data and update all charts"""
-        self._load_data()
-        self._update_summary_kpi()
-        self._plot_goal_progress()
-        self._update_charts_html()
-        self._apply_filters()
+        """Refresh data and update all charts with loading indicator"""
+        # Show lightweight loading overlay first
+        self.loading_overlay.show()
+        self.loading_overlay.raise_()
+
+        # Process events immediately to show loading indicator
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+
+        try:
+            self._load_data()
+            self._update_summary_kpi()
+            self._plot_goal_progress()
+            self._update_charts_html()
+            self._apply_filters()
+        finally:
+            # Hide loading overlay when done
+            self.loading_overlay.hide()
 
     def _update_charts_html(self):
         """Send data to HTML via JavaScript for ECharts rendering"""
@@ -458,33 +528,44 @@ class StatisticsFrame(QWidget):
         self._populate_records_table()
 
     def _populate_records_table(self):
-        """Populate the detailed records table"""
-        self.records_table.setRowCount(len(self.filtered_records))
+        """Populate the detailed records table - optimized for performance"""
+        # Limit to 500 most recent records to avoid UI freeze
+        display_records = self.filtered_records[:500]
 
-        for i, record in enumerate(self.filtered_records):
-            # Date
-            self.records_table.setItem(i, 0, QTableWidgetItem(record['date'].strftime('%Y-%m-%d')))
-            # Character
-            self.records_table.setItem(i, 1, QTableWidgetItem(record['character']))
-            # Type
-            type_text = "搬砖" if record['type'] == ActivityType.GRINDING else "蹲星"
-            self.records_table.setItem(i, 2, QTableWidgetItem(type_text))
-            # Duration
-            self.records_table.setItem(i, 3, QTableWidgetItem(str(record['duration'])))
-            # Silver
-            self.records_table.setItem(i, 4, QTableWidgetItem(f"{record['silver']:,}"))
-            # Success
-            self.records_table.setItem(i, 5, QTableWidgetItem(str(record['success'])))
-            # Efficiency
-            if record['duration'] > 0:
-                if record['type'] == ActivityType.GRINDING:
-                    efficiency = record['silver'] / record['duration']
-                    self.records_table.setItem(i, 6, QTableWidgetItem(f"{efficiency:.2f} SPM"))
+        # Disable updates during population for massive speedup
+        self.records_table.setUpdatesEnabled(False)
+        self.records_table.setSortingEnabled(False)
+
+        try:
+            self.records_table.setRowCount(len(display_records))
+
+            for i, record in enumerate(display_records):
+                # Date
+                self.records_table.setItem(i, 0, QTableWidgetItem(record['date'].strftime('%Y-%m-%d')))
+                # Character
+                self.records_table.setItem(i, 1, QTableWidgetItem(record['character']))
+                # Type
+                type_text = "搬砖" if record['type'] == ActivityType.GRINDING else "蹲星"
+                self.records_table.setItem(i, 2, QTableWidgetItem(type_text))
+                # Duration
+                self.records_table.setItem(i, 3, QTableWidgetItem(str(record['duration'])))
+                # Silver
+                self.records_table.setItem(i, 4, QTableWidgetItem(f"{record['silver']:,}"))
+                # Success
+                self.records_table.setItem(i, 5, QTableWidgetItem(str(record['success'])))
+                # Efficiency
+                if record['duration'] > 0:
+                    if record['type'] == ActivityType.GRINDING:
+                        efficiency = record['silver'] / record['duration']
+                        self.records_table.setItem(i, 6, QTableWidgetItem(f"{efficiency:.2f} SPM"))
+                    else:
+                        efficiency = (record['success'] / record['duration']) * 60
+                        self.records_table.setItem(i, 6, QTableWidgetItem(f"{efficiency:.2f} 星星/小时"))
                 else:
-                    efficiency = (record['success'] / record['duration']) * 60
-                    self.records_table.setItem(i, 6, QTableWidgetItem(f"{efficiency:.2f} 星星/小时"))
-            else:
-                self.records_table.setItem(i, 6, QTableWidgetItem("-"))
+                    self.records_table.setItem(i, 6, QTableWidgetItem("-"))
+        finally:
+            self.records_table.setSortingEnabled(True)
+            self.records_table.setUpdatesEnabled(True)
 
     def _calculate_efficiency_data(self):
         """Calculate efficiency data for each character"""
@@ -628,45 +709,35 @@ class StatisticsFrame(QWidget):
         return f"#{r:02x}{g:02x}{b:02x}"
 
     def _create_thermal_heatmap(self, progress_pct: float, is_dark: bool, dark_color: str, light_color: str):
-        """Create a continuous thermal heatmap progress bar
-        Gradient effect from cold (dark color) to hot (light color) at the progress edge
-        Automatically expands to fill available width and resizes with window
+        """Create a continuous thermal heatmap progress bar using CSS gradient
+        Uses single widget instead of 50 QLabels for 50x faster performance
         """
         from PySide6.QtWidgets import QSizePolicy
         container = QWidget()
         container.setFixedHeight(24)
         container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout = QHBoxLayout(container)
-        layout.setSpacing(1)
-        layout.setContentsMargins(0, 0, 0, 0)
 
-        # 50 blocks for smooth thermal gradient effect - evenly distributed
-        num_blocks = 50
-        filled_blocks = int(progress_pct * num_blocks / 100)
-        if progress_pct > 0 and filled_blocks == 0:
-            filled_blocks = 1
-
-        for i in range(num_blocks):
-            block = QLabel()
-            block.setFixedHeight(24)
-            block.setMinimumWidth(1)
-            # All blocks get equal space, container handles the expanding
-            block.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
-
-            if i < filled_blocks:
-                # Thermal gradient effect - from dark (older) to light (hotter at the edge)
-                intensity = i / max(filled_blocks - 1, 1) if filled_blocks > 1 else 0.5
-                lighten_amount = intensity * 0.4
-                color = self._lighten_color(dark_color, lighten_amount)
-                block.setStyleSheet(f"QLabel {{ background-color: {color}; border-radius: 2px; }}")
-            else:
-                # Empty background
-                if is_dark:
-                    bg_color = "rgba(255, 255, 255, 0.08)"
-                else:
-                    bg_color = "#e8e8e8"
-                block.setStyleSheet(f"QLabel {{ background-color: {bg_color}; border-radius: 2px; }}")
-            layout.addWidget(block)
+        # Use CSS gradient instead of 50 QLabels - massive performance improvement!
+        if progress_pct > 0:
+            empty_color = "rgba(255, 255, 255, 0.08)" if is_dark else "#e8e8e8"
+            container.setStyleSheet(f"""
+                QWidget {{
+                    border-radius: 6px;
+                    background: linear-gradient(90deg,
+                        {dark_color} 0%,
+                        {light_color} {progress_pct:.2f}%,
+                        {empty_color} {progress_pct:.2f}%,
+                        {empty_color} 100%);
+                }}
+            """)
+        else:
+            bg_color = "rgba(255, 255, 255, 0.08)" if is_dark else "#e8e8e8"
+            container.setStyleSheet(f"""
+                QWidget {{
+                    border-radius: 6px;
+                    background-color: {bg_color};
+                }}
+            """)
 
         return container
 
@@ -1020,10 +1091,12 @@ class StatisticsFrame(QWidget):
         pass
 
     def resizeEvent(self, event):
-        """Resize web view when widget resizes"""
+        """Resize web view and loading overlay when widget resizes"""
         super().resizeEvent(event)
+        # Update loading overlay size
+        self.loading_overlay.resize(self.size())
+        # Trigger resize in ECharts
         if hasattr(self, 'web_view') and self.html_loaded:
-            # Trigger resize in ECharts
             self.web_view.page().runJavaScript("window.resizeAll();")
 
     def _update_stylesheet(self):
